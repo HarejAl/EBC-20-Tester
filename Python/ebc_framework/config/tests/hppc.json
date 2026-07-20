@@ -1,0 +1,14 @@
+{
+  "name": "hppc",
+  "type": "hppc",
+  "cell": "LP604765",
+  "description": "HPPC-style discharge pulse + rest, repeated to cutoff",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "pulse_current": 1.0,
+  "pulse_s": 60,
+  "rest_s": 600,
+  "v_min": 2.80,
+  "max_duration_s": 21600,
+  "comment": "1C (~7A) discharge pulse for 60s, rest 120s, repeated until the cell reaches its min_v (2.80V). No charge pulse -- discharge/rest only, per request."
+}

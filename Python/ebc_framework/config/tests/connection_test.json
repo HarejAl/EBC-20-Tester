@@ -1,0 +1,15 @@
+{
+  "name": "connection_test",
+  "type": "dst",
+  "cell": "cellAlex",
+  "description": "Quick sanity check: confirms serial connectivity and that both discharge and charge commands actually drive the cell",
+  "sample_period_s": 1.0,
+  "repeat": 1,
+  "max_duration_s": 300,
+  "current_unit": "A",
+  "profile": [
+    { "current": -0.5, "duration_s": 60 },
+    { "current":  0.5, "duration_s": 60 }
+  ],
+  "comment": "Run this first on a new setup, before any longer real test: 60s discharge at 0.5A, then 60s charge at 0.5A. Change 'cell' to whichever cell you actually have connected -- 0.5A is gentle enough to be safe on any cell in the library. Watch the LCD: it should show '-PC-', then an active discharge for 60s, then an active charge for 60s."
+}

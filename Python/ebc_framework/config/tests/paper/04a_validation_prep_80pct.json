@@ -1,0 +1,24 @@
+{
+  "name": "paper_validation_prep_80pct",
+  "type": "protocol",
+  "cell": "cellAlex",
+  "sample_period_s": 1.0,
+  "max_duration_s": 21600,
+  "repeat": 1,
+  "order": ["charge", "discharge"],
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 0.5,
+    "v_max": 4.2,
+    "cutoff_c": 0.02,
+    "rest_after_s": 1800
+  },
+  "discharge": {
+    "protocol": "crate",
+    "c_rate": 0.2,
+    "v_min": 2.5,
+    "max_duration_s": 3600,
+    "rest_after_s": 1800
+  },
+  "comment": "Full CC-CV charge (0.5C to 4.2V), rest 30 min, then a TIME-LIMITED 0.2C discharge capped at exactly 3600s (1h) -- removes ~20% of nominal capacity (0.2C x 1h = 0.2 x capacity), landing at ~80% SOC. v_min is set low (2.5V) specifically so this phase stops via the 1-hour time limit, not a voltage cutoff -- 2.5V should not be reachable from 100% SOC at 0.2C within an hour. Rest 30 min after. Then run 04b_validation_profile.json (which assumes it's starting from this ~80% SOC state -- run these two files back-to-back, don't let the cell rest for days between them or self-discharge will drift the actual SOC)."
+}

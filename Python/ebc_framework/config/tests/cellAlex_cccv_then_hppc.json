@@ -1,0 +1,24 @@
+{
+  "name": "cellAlex_cccv_then_hppc",
+  "type": "protocol",
+  "cell": "cellAlex",
+  "sample_period_s": 1.0,
+  "max_duration_s": 21600,
+  "repeat": 1,
+  "order": ["charge", "discharge"],
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 1.0,
+    "v_max": 4.2,
+    "cutoff_c": 0.02,
+    "rest_after_s": 600
+  },
+  "discharge": {
+    "protocol": "hppc",
+    "c_rate": 1.0,
+    "v_min": 2.8,
+    "pulse_s": 60,
+    "pulse_rest_s": 60
+  },
+  "comment": "CC-CV charge at 1C to 4.2V, rest 10 min, then HPPC: 1 min discharge pulse at 1C / 1 min rest, repeated until 2.8V. 'order': [\"charge\",\"discharge\"] runs charge before discharge -- the default protocol order is the other way round."
+}

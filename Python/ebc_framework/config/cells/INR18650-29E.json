@@ -1,0 +1,24 @@
+{
+  "id": "INR18650-29E",
+  "description": "Samsung INR18650-29E, NMC, 18650 cylindrical",
+  "chemistry": "NMC",
+  "nominal_capacity_ah": 2.85,
+  "nominal_voltage_v": 3.63,
+  "voltage": {
+    "max_v": 4.20,
+    "min_v": 2.50,
+    "storage_v": 3.70
+  },
+  "current": {
+    "max_charge_a": 2.75,
+    "max_discharge_a": 8.25,
+    "standard_charge_a": 1.375,
+    "standard_discharge_a": 0.55
+  },
+  "safety": {
+    "hard_max_v": 4.25,
+    "hard_min_v": 2.45,
+    "charge_taper_a": 0.05,
+    "comment": "hard_* are the software emergency stops; stay inside datasheet max/min for normal operation"
+  }
+}

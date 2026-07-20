@@ -1,0 +1,15 @@
+{
+  "name": "full_cycle",
+  "type": "cycle",
+  "cell": "LP604765",
+  "description": "Repeated charge/rest/discharge/rest cycles for capacity-fade tracking",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "repeat": 1,
+  "max_duration_s": 86400,
+  "charge_current": 1,
+  "discharge_current": 1,
+  "rest_after_charge_s": 600,
+  "rest_after_discharge_s": 600,
+  "comment": "one cycle = CC charge to max_v -> rest -> CC discharge to min_v -> rest. Capacity per cycle is logged for SOH fade curves."
+}

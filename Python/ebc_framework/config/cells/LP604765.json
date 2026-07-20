@@ -1,0 +1,24 @@
+{
+  "id": "LP604765",
+  "description": "Pouch cell 1.9Ah",
+  "chemistry": "NMC",
+  "nominal_capacity_ah": 1.9,
+  "nominal_voltage_v": 3.7,
+  "voltage": {
+    "max_v": 4.20,
+    "min_v": 2.80,
+    "storage_v": 3.80
+  },
+  "current": {
+    "max_charge_a": 3.8,
+    "max_discharge_a": 3.8,
+    "standard_charge_a": 1.9,
+    "standard_discharge_a": 1.9
+  },
+  "safety": {
+    "hard_max_v": 4.25,
+    "hard_min_v": 2.75,
+    "charge_taper_a": 0.05,
+    "comment": "hard_* are the software emergency stops; stay inside datasheet max/min for normal operation"
+  }
+}

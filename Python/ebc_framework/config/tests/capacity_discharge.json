@@ -1,0 +1,11 @@
+{
+  "name": "capacity_discharge",
+  "type": "discharge",
+  "cell": "INR18650-29E",
+  "description": "Constant-current discharge to cutoff = SOH capacity measurement",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "current": 0.5,
+  "max_duration_s": 14400,
+  "comment": "discharge at 0.5C to the cell's min_v. Reported Ah is the usable-capacity (SOH) ground truth."
+}

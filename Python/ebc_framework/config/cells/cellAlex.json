@@ -1,0 +1,24 @@
+{
+  "id": "cellAlex",
+  "description": "Pouch cell 7Ah",
+  "chemistry": "NMC",
+  "nominal_capacity_ah": 7,
+  "nominal_voltage_v": 3.7,
+  "voltage": {
+    "max_v": 4.20,
+    "min_v": 2.80,
+    "storage_v": 3.80
+  },
+  "current": {
+    "max_charge_a": 5,
+    "max_discharge_a": 20,
+    "standard_charge_a": 5,
+    "standard_discharge_a": 10
+  },
+  "safety": {
+    "hard_max_v": 4.25,
+    "hard_min_v": 2.75,
+    "charge_taper_a": 0.05,
+    "comment": "hard_* are the software emergency stops; stay inside datasheet max/min for normal operation"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "LFP-3.2V-3200mAh",
+  "description": "Generic LiFePO4 prismatic/cylindrical 3.2 V cell",
+  "chemistry": "LFP",
+  "nominal_capacity_ah": 3.2,
+  "nominal_voltage_v": 3.2,
+  "voltage": {
+    "max_v": 3.65,
+    "min_v": 2.50,
+    "storage_v": 3.30
+  },
+  "current": {
+    "max_charge_a": 3.2,
+    "max_discharge_a": 6.4,
+    "standard_charge_a": 1.6,
+    "standard_discharge_a": 1.6
+  },
+  "safety": {
+    "hard_max_v": 3.70,
+    "hard_min_v": 2.40,
+    "charge_taper_a": 0.064,
+    "comment": "LFP has a flat OCV curve; SOC-from-voltage is hard in the mid range"
+  }
+}

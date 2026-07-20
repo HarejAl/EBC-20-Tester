@@ -1,0 +1,19 @@
+{
+  "name": "paper_pulse_train",
+  "type": "dst",
+  "cell": "cellAlex",
+  "description": "Reduced HPPC-like pulse train: one pass, one temperature, one pulse amplitude -- charge-transfer and contact/ohmic resistance characterization",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "repeat": 8,
+  "max_duration_s": 21600,
+  "profile": [
+    { "current": -1.0, "duration_s": 360 },
+    { "current":  0.0, "duration_s": 1200 },
+    { "current": -1.0, "duration_s": 10 },
+    { "current":  0.0, "duration_s": 300 },
+    { "current":  1.0, "duration_s": 10 },
+    { "current":  0.0, "duration_s": 300 }
+  ],
+  "comment": "8 repeats of: 1C discharge 6 min (~10% SOC step) -> 20 min rest -> 10s discharge pulse 1C -> 5 min rest -> 10s charge pulse 1C -> 5 min rest. ~2180s/repeat x8 = ~4.8h, within the ~5-6h estimate. Run 03a_pulse_train_precharge.json first (full charge + 30 min rest). This is one pass at one temperature/amplitude, not the full multi-week HPPC grid -- the fitted SPMe is what generates the full grid virtually. IMPORTANT HARDWARE LIMIT: the EBC-A20 reports status at a fixed ~1Hz regardless of sample_period_s -- 1.0s here is the finest resolution this tester can actually deliver. It cannot capture a 100ms-1s instantaneous voltage step, so expect R_c/R_ct separation during the 10s pulses to be less clean than a faster instrument (e.g. a potentiostat/cycler with sub-second logging) would give. If that separation is critical for the paper, this pulse-resistance data may need a different instrument."
+}

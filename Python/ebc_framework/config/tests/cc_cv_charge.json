@@ -1,0 +1,11 @@
+{
+  "name": "cc_cv_charge",
+  "type": "charge",
+  "cell": "LP604765",
+  "description": "Constant-current charge at standard rate; device handles CV taper",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "current": 0.5,
+  "max_duration_s": 14400,
+  "comment": "charge current 0.5C. Charge target voltage and taper come from the cell's bounds (max_v, charge_taper_a)."
+}

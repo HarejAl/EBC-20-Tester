@@ -1,0 +1,22 @@
+{
+  "name": "cc_discharge_cccv_charge_cycles",
+  "type": "protocol",
+  "cell": "cellAlex",
+  "sample_period_s": 1.0,
+  "max_duration_s": 21600,
+  "repeat": 10,
+  "discharge": {
+    "protocol": "crate",
+    "c_rate": 2.0,
+    "v_min": 2.75,
+    "rest_after_s": 600
+  },
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 1.0,
+    "v_max": 4.2,
+    "cutoff_c": 0.02,
+    "rest_after_s": 600
+  },
+  "comment": "10 cycles of: constant-current (1C) discharge, 10 min rest, CC-CV (1C) charge, 10 min rest."
+}

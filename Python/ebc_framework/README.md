@@ -1,0 +1,255 @@
+# EBC-A20 control & experiment framework
+
+Drive a **ZKETECH EBC-A20** battery tester from a PC for **SOC/SOH algorithm
+validation** on real cells. Define tests and cells in JSON; one entry point
+(`launchTest.py`) runs DST profiles, HPPC pulse tests, charge, discharge
+(capacity/SOH), full cycles, or a composite multi-phase protocol — on the real
+device or a built-in simulator.
+
+## What "reverse engineered" means here
+
+ZKETECH never published the EBC-A20 serial protocol. The byte format was
+recovered by sniffing traffic between the official Windows app and the device
+and inferring each field's meaning. The frame format is solid, but field
+*scaling* is inferred and can vary by firmware revision — run
+`examples/verify_protocol.py` once against your physical unit (compare decoded
+V/I to the LCD) before trusting the numbers on a new setup.
+
+## Measurement sampling rate
+
+The device emits a status frame ~**once per second**; this cadence is set by
+the EBC firmware and **cannot** be increased from the PC. Polling faster just
+re-reads the same frame. `sample_period_s` in a test controls how often the
+control loop re-evaluates/re-commands, not the hardware measurement rate.
+
+## Getting started (new machine / new colleague)
+
+Not comfortable with a terminal? See **`HOW_TO_LAUNCH.md`** for an explicit,
+copy-paste walkthrough (opening PowerShell, finding the folder, exact
+commands) — including how to run the paper protocols in `config/tests/paper/`.
+
+1. Install Python 3.10+ and `pip install pyserial matplotlib`.
+2. Run `python selftest.py` — it validates the protocol decoder, base-240
+   encoding, and runs every test type on the built-in simulator. Should print
+   `ALL CHECKS PASSED` / `CONFIG-DRIVEN CHECKS PASSED` with no hardware
+   attached.
+3. Connect the EBC-A20 over USB (CH340 chip → shows up as `/dev/ttyUSB0` on
+   Linux, `COMx` on Windows — check Device Manager if unsure which COM number).
+4. Run `python examples/verify_protocol.py COM5` (swap in your port) with a
+   cell/load connected, and compare the printed V/I against the EBC's own LCD.
+   If they don't match within a few percent, the decoder needs adjusting for
+   your firmware before trusting anything else here.
+5. Run the **connection test** (below) to confirm both discharge and charge
+   commands actually drive the cell, not just the read path.
+6. You're set — run any test in `config/tests/` against your own cell.
+
+## Connection test
+
+`config/tests/connection_test.json` is a 2-minute sanity check: 60 s discharge
+at 0.5 A, then 60 s charge at 0.5 A. Run it first on any new setup:
+
+```bash
+python launchTest.py config/tests/connection_test.json --port COM5
+```
+
+Watch the LCD: it should show `-PC-`, then an active discharge for 60 s, then
+an active charge for 60 s. 0.5 A is gentle enough to be safe on any cell in the
+library — just edit the `"cell"` field to match whichever cell you actually
+have connected.
+
+## Layout
+
+```
+ebc/
+  protocol.py    frame build/parse, base-240 + decode_ranged (verified)
+  transport.py   SerialTransport (real) + SimulatorTransport (1-RC cell model)
+  device.py      EBCA20 controller, SafetyLimits, generic run() loop
+  experiment.py  DataLogger, ProfileController, dst_profile, capacity_test
+  celllib.py     Cell + CellLibrary: load cell JSON, derive safety bounds
+  runner.py      TestDef + run_test: dispatch JSON tests (all types below)
+config/
+  cells/*.json   cell library (capacity, voltage window, current ratings, bounds)
+  tests/*.json   test definitions (dst / charge / discharge / hppc / cycle / protocol)
+examples/
+  verify_protocol.py   one-time real-hardware decoder check (see above)
+  verify_stop.py       confirms STOP actually halts an active discharge
+  run_dst_real.py      standalone DST script (no JSON needed)
+  plot_log.py          plot a logged CSV, standalone or live (see below)
+launchTest.py    single CLI entry point -- run any JSON test, hardware or sim
+results/         output CSVs + metadata (created automatically)
+selftest.py      offline validation of the whole stack -- run this first
+```
+
+## Running a test
+
+### From VS Code (no command to type)
+
+Open `runTestVSCode.py` and edit the settings at the top: `TEST`, `CELL`,
+`PORT`, `SIMULATOR`, and `LIVE_PLOT`. Then click **Run Python File** in the
+top-right corner, or select **EBC-20: run configured test** in Run and Debug
+and press F5.
+
+`TEST` may be just the file stem (for example `"capacity_discharge"`). `CELL`
+is an ID from `config/cells`; it overrides the cell in the test. Set `CELL =
+None` when you want to use the test JSON's own cell.
+
+### From a terminal
+
+```bash
+# List the cell library:
+python launchTest.py --list-cells
+
+# Dry-run any test on the simulator (no hardware), accelerated:
+python launchTest.py config/tests/dst_validation.json --sim --time-accel 60
+
+# Run for real (Linux /dev/ttyUSB0, Windows COM3):
+python launchTest.py config/tests/dst_validation.json --port COM3
+
+# Select/override the cell at launch and show a live plot:
+python launchTest.py dst_validation --cell cellAlex --port COM3 --live-plot
+```
+
+While running, `launchTest.py` prints one line per sample (`t=... V=... I=...
+Ah=... [mode]`) and writes to `results/<name>_<timestamp>.csv`. A sibling
+`<name>_<timestamp>_meta.json` is written **as soon as the run starts** (not
+after it finishes), so even an early-terminated or crashed run leaves you
+knowing exactly what test/cell config produced the partial CSV.
+
+### Watching a run live
+
+Plotting is a separate process from the one talking to the hardware, so it
+can't interfere with serial timing. Open a second terminal:
+
+```bash
+python examples/plot_log.py results/<name>_<timestamp>.csv --watch
+```
+
+refreshes every 2 s as the CSV grows. Drop `--watch` for a one-shot plot after
+a run finishes. Run `plot_log.py` with no arguments (or click Run in VS Code)
+to get a file-picker dialog defaulting to `results/` instead.
+
+## Cells
+
+A cell JSON captures datasheet facts and emergency bounds:
+
+```json
+{
+  "id": "cellAlex",
+  "description": "Pouch cell 7Ah",
+  "chemistry": "NMC",
+  "nominal_capacity_ah": 7.0,
+  "nominal_voltage_v": 3.7,
+  "voltage": { "max_v": 4.20, "min_v": 2.80, "storage_v": 3.80 },
+  "current": { "max_charge_a": 5.0, "max_discharge_a": 20.0,
+               "standard_charge_a": 5.0, "standard_discharge_a": 10.0 },
+  "safety": { "hard_max_v": 4.25, "hard_min_v": 2.75, "charge_taper_a": 0.05 }
+}
+```
+
+`max_v`/`min_v` are the normal operating window (used as device-side cutoffs);
+`hard_max_v`/`hard_min_v` are the software emergency-stop bounds. Add a file
+per cell to `config/cells/`. A test may reference a cell by its `id`, leave
+`"cell": ""`, or omit `cell` entirely. In the latter two cases, select it at
+launch with `--cell` or the VS Code launcher's `CELL` setting. A launch-time
+cell always overrides the test value. Any current a test requests is
+**silently clamped** (never raises) to the stricter of the
+cell's own `max_charge_a`/`max_discharge_a` and the EBC-A20's own absolute
+hardware ceiling (5 A charge / 20 A discharge) — check the logged current in
+the CSV, not just the test JSON, to see what was actually applied if you
+over-scale a profile.
+
+## Tests
+
+Test currents are **C-rate** (`"current_unit": "C"`) and scaled by the cell's
+nominal capacity, so the same test runs across cells. Set `"current_unit":
+"A"` for absolute amps. Types:
+
+- `dst`       — staircase `profile` of `{current, duration_s}` steps you define
+                yourself in the JSON (e.g. a published FUDS/DST table),
+                repeated `repeat` times.
+- `charge`    — CC charge to the cell's `max_v` (device handles CV taper).
+- `discharge` — CC discharge to `min_v` (or an optional `v_cutoff` override,
+                never lower than `min_v`); reports usable Ah (SOH ground truth).
+- `hppc`      — discharge pulse (`pulse_current`, `pulse_s`) / rest (`rest_s`),
+                repeated until `v_min` -- resistance/relaxation characterization.
+- `cycle`     — charge / rest / discharge / rest, `repeat` times; logs
+                per-cycle discharge capacity.
+- `protocol`  — composite test combining an optional discharge phase, rest,
+                optional CC-CV charge phase, and rest, repeated `repeat`
+                times. This is the most flexible type -- see below.
+
+### `protocol` schema
+
+```json
+{
+  "type": "protocol", "cell": "cellAlex", "repeat": 3,
+  "discharge": {
+    "protocol": "dst",       // "dst" | "hppc" | "crate" | null (skip discharge)
+    "c_rate": 2.0,           // scales the built-in DST staircase, or the
+                             // pulse/constant current for hppc/crate
+    "v_min": 3.0,            // stop once voltage drops to/below this
+    "rest_after_s": 300,     // rest after the discharge phase ends
+    "pulse_s": 60,           // hppc only
+    "pulse_rest_s": 120      // hppc only (rest *between* pulses)
+  },
+  "charge": {
+    "protocol": "cc_cv",     // only supported value, or null (skip charge)
+    "c_rate": 1.0,
+    "v_max": 4.2,            // CC target voltage, capped at the cell's own max_v
+    "cutoff_c": 0.02,        // taper/termination current as a C-rate
+    "rest_after_s": 300
+  }
+}
+```
+
+Either `"discharge"` or `"charge"` can be `null`/omitted for a charge-only or
+discharge-only repeated protocol. Note: `protocol`'s `"dst"` discharge mode
+plays the fixed built-in staircase shape (`ebc/experiment.py:dst_profile`)
+scaled by a single C-rate number -- it can't reproduce an arbitrary custom
+profile. If you need a specific published DST/FUDS table, use the standalone
+`"dst"` test type instead, which reads whatever `profile` array you put in
+the JSON directly.
+
+## Safety
+
+Three layers, all derived from the cell file:
+1. **Device-side cutoffs** embedded in each command frame (low-V for
+   discharge, CV + taper for charge) — protect the cell even if the PC/loop
+   stalls.
+2. **Software `SafetyLimits`** checked every loop; issues STOP on violation.
+3. **Current clamping** on every `set_charge`/`set_discharge` call — caps to
+   the stricter of the cell's rating and the EBC's own hardware ceiling,
+   without ever raising an error (see Cells, above).
+
+Set conservative bounds for your chemistry. Never leave a charging cell
+unattended.
+
+## A real-hardware quirk worth knowing
+
+Confirmed on real hardware: **the EBC only accepts a new start-charge/
+start-discharge command when it's currently idle** — a command sent while
+already actively driving current is silently ignored. `EBCA20.set_current()`
+already handles this for you (it forces an explicit STOP with a brief settle
+delay before every setpoint change), so you don't need to think about it when
+writing a test — but if you're calling `set_charge`/`set_discharge` directly
+in your own script rather than through `set_current()`/the test runner,
+remember to stop first.
+
+## Simulator
+
+`--sim` swaps in a 1-RC Thevenin cell (OCV-SOC curve, coulomb integration) so
+you can develop and validate control/estimation logic with no hardware.
+`--time-accel N` compresses both the cell physics and profile-step durations
+by N for fast dry runs. The real backend ignores acceleration. Always dry-run
+a new test on the simulator before running it for real.
+
+## Protocol provenance
+
+Frame format, 9600 **8O1** serial, base-240 encoding and `decode_ranged` from
+the documented reverse-engineering by Maciej Grela / enkiusz
+(`pop.fsck.pl/hardware/zketech-ebc-a20.html`), cross-checked with
+`Kazhuu/ebc-battery-tester` (FRAMES.md) and `dev-strom/esp-ebc-mqtt`. The
+self-test confirms the decoder reproduces the documented frame CRC. Field
+scaling for the *current* channel was found to differ from the documented
+value on our unit (confirmed against the LCD) and is corrected in
+`ebc/protocol.py` -- re-verify on any new firmware revision.

@@ -1,0 +1,22 @@
+{
+  "name": "cellAlex_protocol",
+  "type": "protocol",
+  "cell": "cellAlex",
+  "sample_period_s": 1.0,
+  "max_duration_s": 21600,
+  "repeat": 3,
+  "discharge": {
+    "protocol": "dst",
+    "c_rate": 3.0,
+    "v_min": 2.5,
+    "rest_after_s": 300
+  },
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 1.0,
+    "v_max": 4.2,
+    "cutoff_c": 0.02,
+    "rest_after_s": 300
+  },
+  "comment": "discharge: built-in DST staircase scaled by 2C, looped until 3.0V, then rest 5 min. charge: CC-CV at 1C to 4.2V with 0.02C taper cutoff, then rest 5 min. Repeated 3 times. Set discharge or charge to null to skip that phase (charge-only or discharge-only). Any C-rate that would exceed the cell's own rating or the EBC's own hardware ceiling (5A charge / 20A discharge) is silently clamped -- check the logged current, not just this file, to see what was actually applied."
+}
