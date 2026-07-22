@@ -38,7 +38,61 @@ for name, fr in [
     assert P.crc(fr[1:-2]) == fr[-2]
     print(f"  {name:32s} -> {fr.hex(' ')}")
 
-print("\n=== 5. end-to-end DST run on the simulator ===")
+print("\n=== 5. per-direction cell current limits ===")
+
+class CaptureTransport:
+    def __init__(self):
+        self.frames = []
+
+    def write(self, frame):
+        self.frames.append(frame)
+
+
+capture = CaptureTransport()
+guard = EBCA20(capture, SafetyLimits(
+    i_max=2.0, i_max_charge=1.906, i_max_discharge=2.407))
+guard.set_charge(9.0)
+charge_frame = capture.frames[-1]
+charge_command_a = P.decode_base240(charge_frame[2], charge_frame[3]) / 100
+assert charge_command_a == 1.90
+guard.set_discharge(9.0)
+discharge_frame = capture.frames[-1]
+discharge_command_a = (
+    P.decode_base240(discharge_frame[2], discharge_frame[3]) / 100)
+assert discharge_command_a == 2.40
+
+safe_charge = P.Measurement(P.PT_STATUS_CHARGE_RUN, 3.7, 1.906, 0.0,
+                            P.DEVICE_TYPE_A20, "charge", b"")
+high_charge = P.Measurement(P.PT_STATUS_CHARGE_RUN, 3.7, 1.907, 0.0,
+                            P.DEVICE_TYPE_A20, "charge", b"")
+safe_discharge = P.Measurement(P.PT_STATUS_DISCHARGE_RUN, 3.7, 2.407, 0.0,
+                               P.DEVICE_TYPE_A20, "discharge", b"")
+high_discharge = P.Measurement(P.PT_STATUS_DISCHARGE_RUN, 3.7, 2.408, 0.0,
+                               P.DEVICE_TYPE_A20, "discharge", b"")
+assert guard.check_safety(safe_charge) is None
+assert guard.check_safety(high_charge) is not None
+assert guard.check_safety(safe_discharge) is None
+assert guard.check_safety(high_discharge) is not None
+print("  commands clamp downward to charge/discharge limits")
+print("  measured overcurrent trips independently in each direction")
+
+print("\n=== 5b. HPPC repeats a missed STOP command ===")
+from ebc.runner import PulseRestController
+
+_hppc_guard = PulseRestController(discharge_a=1.9, pulse_s=60,
+                                  rest_s=600, v_min=2.75)
+_running = P.Measurement(P.PT_STATUS_DISCHARGE_RUN, 3.6, 1.9, 0.0,
+                         P.DEVICE_TYPE_A20, "discharge", b"")
+_idle = P.Measurement(P.PT_STATUS_IDLE, 3.7, 0.0, 0.0,
+                      P.DEVICE_TYPE_A20, "idle", b"")
+assert _hppc_guard(_running, 0.0) == -1.9
+assert _hppc_guard(_running, 61.0) == 0.0
+# The first STOP was ignored: the controller must emit STOP again, not None.
+assert _hppc_guard(_running, 62.0) == 0.0
+assert _hppc_guard(_idle, 63.0) is None
+print("  STOP is repeated until measured current is zero")
+
+print("\n=== 6. end-to-end DST run on the simulator ===")
 limits = SafetyLimits(v_max=4.25, v_min=2.6, i_max=5.0, discharge_cutoff_v=2.6)
 dev = EBCA20.on_simulator(limits=limits, capacity_ah=3.0, soc0=0.6,
                           emit_period_s=0.0, time_accel=60.0)
@@ -57,7 +111,7 @@ print(f"  run ended: {reason}")
 print(f"  samples logged: {log.rows}")
 print(f"  final sim SOC: {dev._t.soc:.3f}, last V: {dev.last.voltage:.3f} V")
 
-print("\n=== 6. capacity (SOH ground-truth) test on simulator ===")
+print("\n=== 7. capacity (SOH ground-truth) test on simulator ===")
 dev2 = EBCA20.on_simulator(limits=SafetyLimits(v_min=2.5),
                            capacity_ah=3.0, soc0=1.0, emit_period_s=0.0,
                            time_accel=2000.0)
@@ -68,8 +122,8 @@ print(f"  measured capacity: {res.capacity_ah:.3f} Ah")
 print(f"  energy: {res.energy_wh:.3f} Wh, V {res.v_start:.3f}->{res.v_end:.3f}")
 print("\nALL CHECKS PASSED")
 
-# ---- 7. config-driven runner (cell library + JSON tests) ----
-print("\n=== 7. config-driven runner: all test types on simulator ===")
+# ---- 8. config-driven runner (cell library + JSON tests) ----
+print("\n=== 8. config-driven runner: all test types on simulator ===")
 from ebc.celllib import CellLibrary
 from ebc.runner import TestDef, run_test
 from ebc import DataLogger as DL
@@ -79,6 +133,8 @@ print(f"  cells loaded: {', '.join(_lib.ids())}")
 
 _cfg = os.path.join(SCRIPT_DIR, "config", "tests")
 _cases = [
+    ("rest.json",             {"cell": "LP604765",
+                                "max_duration_s": 5}, 100.0,  0.7),
     ("dst_validation.json",   {"repeat": 2}, 60.0,   0.7),
     ("cc_cv_charge.json",     {},            600.0,  0.2),
     ("capacity_discharge.json", {},          2000.0, 1.0),

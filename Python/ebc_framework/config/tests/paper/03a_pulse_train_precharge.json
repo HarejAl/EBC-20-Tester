@@ -1,17 +1,17 @@
 {
   "name": "paper_pulse_train_precharge",
   "type": "protocol",
-  "cell": "cellAlex",
+  "cell": "",
   "sample_period_s": 1.0,
-  "max_duration_s": 21600,
+  "initial_rest_s": 10,
   "repeat": 1,
   "discharge": null,
   "charge": {
     "protocol": "cc_cv",
     "c_rate": 0.5,
-    "v_max": 4.2,
     "cutoff_c": 0.02,
+    "max_duration_s": 21600,
     "rest_after_s": 1800
   },
-  "comment": "CC-CV charge to full (0.5C to 4.2V, 0.02C taper cutoff), then 30 min rest, to bring the cell to a settled full-charge state before 03b_pulse_train.json. Run this first."
+  "comment": "Select the same cell that will be used for 03b. Charge at 0.5C to the selected cell's max_v with a 0.02C taper cutoff, then rest and log for 30 min. Run this immediately before 03b_pulse_train.json."
 }

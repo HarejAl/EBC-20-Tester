@@ -1,22 +1,22 @@
 {
   "name": "paper_cc_discharge_0p5C",
   "type": "protocol",
-  "cell": "cellAlex",
+  "cell": "",
   "sample_period_s": 3,
-  "max_duration_s": 21600,
+  "initial_rest_s": 10,
   "repeat": 1,
   "discharge": {
     "protocol": "crate",
     "c_rate": 0.5,
-    "v_min": 2.8,
+    "max_duration_s": 21600,
     "rest_after_s": 1800
   },
   "charge": {
     "protocol": "cc_cv",
     "c_rate": 0.5,
-    "v_max": 4.2,
     "cutoff_c": 0.02,
+    "max_duration_s": 21600,
     "rest_after_s": 600
   },
-  "comment": "0.5C full discharge to 2.80V, then 30 min rest with logging still on (the relaxation tail feeds the diffusion time-constant fit), then CC-CV recharge to full at 0.5C to prep for the next C-rate file. Start from a full charge. Run this file, then 02b (1C), then 02c (2C), in sequence for the full ~1-day set."
+  "comment": "Select the same cell for protocols 02a-02c. Start fully charged. Discharge at 0.5C to the selected cell's min_v, log 30 min relaxation, then recharge at 0.5C to its max_v with a 0.02C taper and rest 10 min. Run 02a, 02b, then 02c in order."
 }

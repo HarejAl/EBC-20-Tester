@@ -76,7 +76,7 @@ examples/
   run_dst_real.py      standalone DST script (no JSON needed)
   plot_log.py          plot a logged CSV, standalone or live (see below)
 launchTest.py    single CLI entry point -- run any JSON test, hardware or sim
-results/         output CSVs + metadata (created automatically)
+results/<protocol>/  raw CSVs + metadata/checkpoints, grouped by protocol
 selftest.py      offline validation of the whole stack -- run this first
 ```
 
@@ -110,10 +110,38 @@ python launchTest.py dst_validation --cell cellAlex --port COM3 --live-plot
 ```
 
 While running, `launchTest.py` prints one line per sample (`t=... V=... I=...
-Ah=... [mode]`) and writes to `results/<name>_<timestamp>.csv`. A sibling
+Ah=... [mode]`) and writes to
+`results/<name>/<name>_<timestamp>.csv`. Sibling
 `<name>_<timestamp>_meta.json` is written **as soon as the run starts** (not
 after it finishes), so even an early-terminated or crashed run leaves you
 knowing exactly what test/cell config produced the partial CSV.
+
+Every test starts with a 10-second zero-current rest, which is included in the
+CSV. This applies automatically to all test types and existing test files. If
+needed for a special case, a test JSON can override the duration with
+`"initial_rest_s": 120` (or use `0` to disable it).
+
+### Stop now and continue later
+
+Stop a running test with **Ctrl-C in VS Code's integrated terminal**. The
+device receives STOP and the run keeps a sibling `<name>_checkpoint.json`.
+Do not use VS Code's force-terminate/trash button for a normal pause, because
+it may kill Python before it can send STOP. To continue from
+VS Code, set `SELECT_RESUME_FILE = True` in `runTestVSCode.py`, run the file,
+and select either the interrupted CSV or its checkpoint. Alternatively, set
+`RESUME_FROM` directly to that path.
+
+From a terminal, the equivalent is:
+
+```bash
+python launchTest.py --resume results/<name>/<interrupted-run>.csv --port COM5
+```
+
+Continuation appends to the original CSV and restores the cycle/phase plus
+DST step, HPPC pulse/rest position, or cycle sub-phase. A fresh 10-second
+zero-current safety rest always occurs before current is reapplied. Time spent
+offline counts toward an interrupted rest period, but not toward an active
+charge/discharge duration. Completed runs cannot be resumed accidentally.
 
 ### Watching a run live
 
@@ -121,7 +149,7 @@ Plotting is a separate process from the one talking to the hardware, so it
 can't interfere with serial timing. Open a second terminal:
 
 ```bash
-python examples/plot_log.py results/<name>_<timestamp>.csv --watch
+python examples/plot_log.py results/<name>/<name>_<timestamp>.csv --watch
 ```
 
 refreshes every 2 s as the CSV grows. Drop `--watch` for a one-shot plot after
@@ -146,8 +174,10 @@ A cell JSON captures datasheet facts and emergency bounds:
 }
 ```
 
-`max_v`/`min_v` are the normal operating window (used as device-side cutoffs);
-`hard_max_v`/`hard_min_v` are the software emergency-stop bounds. Add a file
+`max_v`/`min_v` are the normal operating defaults. Explicit test targets may
+go outside that nominal window, but are capped at `hard_max_v`/`hard_min_v`.
+Those hard limits are applied both to the tester-side cutoff command and the
+software emergency STOP. Add a file
 per cell to `config/cells/`. A test may reference a cell by its `id`, leave
 `"cell": ""`, or omit `cell` entirely. In the latter two cases, select it at
 launch with `--cell` or the VS Code launcher's `CELL` setting. A launch-time
@@ -169,9 +199,11 @@ nominal capacity, so the same test runs across cells. Set `"current_unit":
                 repeated `repeat` times.
 - `charge`    — CC charge to the cell's `max_v` (device handles CV taper).
 - `discharge` — CC discharge to `min_v` (or an optional `v_cutoff` override,
-                never lower than `min_v`); reports usable Ah (SOH ground truth).
+                never lower than `hard_min_v`); reports usable Ah.
 - `hppc`      — discharge pulse (`pulse_current`, `pulse_s`) / rest (`rest_s`),
                 repeated until `v_min` -- resistance/relaxation characterization.
+- `rest`      — passive observation at zero applied current; logs the cell for
+                `max_duration_s` after explicitly stopping the tester.
 - `cycle`     — charge / rest / discharge / rest, `repeat` times; logs
                 per-cycle discharge capacity.
 - `protocol`  — composite test combining an optional discharge phase, rest,
@@ -195,7 +227,7 @@ nominal capacity, so the same test runs across cells. Set `"current_unit":
   "charge": {
     "protocol": "cc_cv",     // only supported value, or null (skip charge)
     "c_rate": 1.0,
-    "v_max": 4.2,            // CC target voltage, capped at the cell's own max_v
+    "v_max": 4.2,            // default max_v; explicit values cap at hard_max_v
     "cutoff_c": 0.02,        // taper/termination current as a C-rate
     "rest_after_s": 300
   }

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "complete": false,
+  "test_path": "c:\\Users\\alexa\\OneDrive - Politecnico di Milano\\Desktop\\Batteries\\Python codes\\Tester\\Python\\ebc_framework\\config\\tests\\cc_cv_charge.json",
+  "cell_id": "LP604765",
+  "csv_path": "c:\\Users\\alexa\\OneDrive - Politecnico di Milano\\Desktop\\Batteries\\Python codes\\Tester\\Python\\ebc_framework\\results\\cc_cv_charge\\cc_cv_charge_20260722_123603.csv",
+  "runner_state": {
+    "stage": "main",
+    "test_type": "charge",
+    "phase_elapsed_s": 0.0,
+    "csv_elapsed_s": 0.0
+  },
+  "created_at": "2026-07-22 12:36:03",
+  "saved_at_epoch": 1784716573.9425292
+}

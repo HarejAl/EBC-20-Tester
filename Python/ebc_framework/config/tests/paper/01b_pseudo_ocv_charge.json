@@ -1,11 +1,16 @@
 {
   "name": "paper_pseudo_ocv_charge",
   "type": "charge",
-  "cell": "cellAlex",
+  "cell": "",
   "description": "Stage 0 (LFP cells only): pseudo-OCV C/20 charge, opposite direction to 01_pseudo_ocv_discharge.json",
   "sample_period_s": 30,
-  "current_unit": "C",
-  "current": 0.05,
+  "initial_rest_s": 10,
   "max_duration_s": 90000,
-  "comment": "Only needed for LFP cells, to average against the C/20 discharge pass and cancel voltage hysteresis (Kang et al.). Precondition: fully discharge the cell (to min_v) and rest >=1h before starting this file. NMC/NCA cells (cellAlex as currently configured in the library): skip this file, 01_pseudo_ocv_discharge.json alone is sufficient. If running on an LFP cell, change 'cell' below to your LFP entry (e.g. 'LFP-3.2V-3200mAh') first. Note: like every charge command on this hardware, the device's own CC-CV backstop still applies near the top of charge (a brief CV/taper phase before cutoff) -- this is a hardware characteristic of the EBC-A20's charge command, not something this framework can bypass. If that tail distorts your OCV curve, trim samples after the device leaves 'charge' mode (see the CSV's mode column) before use."
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 0.05,
+    "cutoff_c": 0.02,
+    "rest_after_s": 0
+  },
+  "comment": "LFP only: select the LFP cell at launch. Charge at C/20 from the fully discharged, >=1h-rested state to the selected cell's max_v, with a 0.02C taper cutoff. Average this trace with 01_pseudo_ocv_discharge.json to reduce voltage hysteresis. The EBC necessarily finishes with a CV/taper segment; trim that tail during OCV processing if required."
 }

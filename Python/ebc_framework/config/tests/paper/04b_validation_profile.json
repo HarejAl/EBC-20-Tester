@@ -1,9 +1,10 @@
 {
   "name": "paper_validation_profile",
   "type": "dst",
-  "cell": "cellAlex",
+  "cell": "",
   "description": "PLACEHOLDER -- replace 'profile' below with your actual held-out validation current trace",
   "sample_period_s": 1.0,
+  "initial_rest_s": 10,
   "current_unit": "A",
   "repeat": 1,
   "max_duration_s": 7200,
@@ -14,5 +15,5 @@
     { "current": -3.5, "duration_s": 25 },
     { "current": 0.5, "duration_s": 10 }
   ],
-  "comment": "The 'profile' array above is an ILLUSTRATIVE PLACEHOLDER (a few arbitrary steps), NOT a real WLTP/UDDS/multisine trace -- replace it with your actual validation current sequence before running (current in Amps, since current_unit='A' here so values map 1:1 to the cell terminals, unlike the C-rate-scaled tests elsewhere). Run 04a_validation_prep_80pct.json immediately before this one, so the cell starts from a known ~80% SOC after a known charge+rest. This file must never be used for fitting -- it's the held-out set the fit is judged on."
+  "comment": "Select the same cell used for 04a. The profile is an illustrative placeholder, not a real WLTP/UDDS/multisine trace; replace it before running. Values are absolute amps because current_unit is A, with positive charge and negative discharge. Commands are independently capped to the selected cell's charge/discharge limits. Run immediately after 04a and keep this dataset held out from model fitting."
 }

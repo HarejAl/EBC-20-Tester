@@ -1,22 +1,22 @@
 {
   "name": "paper_cc_discharge_2C",
   "type": "protocol",
-  "cell": "cellAlex",
+  "cell": "",
   "sample_period_s": 3,
-  "max_duration_s": 21600,
+  "initial_rest_s": 10,
   "repeat": 1,
   "discharge": {
     "protocol": "crate",
     "c_rate": 2.0,
-    "v_min": 2.8,
+    "max_duration_s": 21600,
     "rest_after_s": 1800
   },
   "charge": {
     "protocol": "cc_cv",
-    "c_rate": 0.5,
-    "v_max": 4.2,
+    "c_rate": 2,
     "cutoff_c": 0.02,
-    "rest_after_s": 600
+    "max_duration_s": 21600,
+    "rest_after_s": 1800
   },
-  "comment": "2C full discharge to 2.80V (14A on cellAlex's 7Ah nominal capacity -- confirmed within cellAlex's own max_discharge_a (20A) and the EBC-A20's absolute hardware ceiling (20A), so it will run at the full requested 2C, not silently clamped), then 30 min rest with logging still on, then CC-CV recharge to full at 0.5C. Run 02a (0.5C) and 02b (1C) first, then this file. This is the run that excites the electrolyte/porosity parameters -- if it were unsafe on your cell/cycler you'd drop those from the fitted set, but on cellAlex it's within bounds."
+  "comment": "Select the same cell used for 02a-02b. Discharge at up to 2C to its min_v, log 30 min relaxation, then recharge at 0.5C to its max_v with a 0.02C taper and rest 10 min. The command is automatically capped if 2C exceeds the selected cell or EBC discharge-current limit; confirm the achieved current in the CSV."
 }

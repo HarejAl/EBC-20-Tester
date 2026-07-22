@@ -1,0 +1,42 @@
+{
+  "test": {
+    "name": "cc_cv_charge",
+    "type": "charge",
+    "cell": "LP604765",
+    "description": "Constant-current charge at standard rate; device handles CV taper",
+    "sample_period_s": 1.0,
+    "max_duration_s": 14400,
+    "current_unit": "C",
+    "charge": {
+      "protocol": "cc_cv",
+      "c_rate": 2,
+      "v_max": 4.24,
+      "cutoff_c": 0.1,
+      "rest_after_s": 60
+    },
+    "comment": "charge current 0.5C. Charge target voltage and taper come from the cell's bounds (max_v, charge_taper_a)."
+  },
+  "cell": {
+    "id": "LP604765",
+    "description": "Pouch cell 1.9Ah",
+    "chemistry": "NMC",
+    "nominal_capacity_ah": 1.9,
+    "nominal_voltage_v": 3.7,
+    "max_v": 4.2,
+    "min_v": 2.75,
+    "storage_v": 3.8,
+    "max_charge_a": 3.8,
+    "max_discharge_a": 3.8,
+    "standard_charge_a": 1.9,
+    "standard_discharge_a": 1.9,
+    "hard_max_v": 4.25,
+    "hard_min_v": 2.75,
+    "charge_taper_a": 0.05
+  },
+  "run": {
+    "timestamp": "2026-07-22 12:36:03",
+    "backend": "serial COM5",
+    "selected_cell_id": "LP604765",
+    "csv_file": "cc_cv_charge_20260722_123603.csv"
+  }
+}

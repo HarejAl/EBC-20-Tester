@@ -1,0 +1,16 @@
+{
+  "name": "paper_slow_finish_charge",
+  "type": "charge",
+  "cell": "",
+  "description": "Slow C/10 CC-CV finishing charge after a faster charge",
+  "sample_period_s": 5.0,
+  "initial_rest_s": 10,
+  "max_duration_s": 43200,
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 0.5,
+    "cutoff_c": 0.02,
+    "rest_after_s": 0
+  },
+  "comment": "Select the cell at launch. Use after a faster charge to fill the remaining capacity gently: charge at C/10 to the selected cell's max_v, hold CV, and finish when current tapers to 0.02C. The 12h limit is a safety ceiling; the phase should normally be much shorter when used as a top-off. Change c_rate if a different finishing rate is required."
+}

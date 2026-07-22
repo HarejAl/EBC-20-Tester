@@ -1,0 +1,10 @@
+{
+  "name": "rest_observation",
+  "type": "rest",
+  "cell": "",
+  "description": "Passively observe and log the cell with zero applied current",
+  "sample_period_s": 1.0,
+  "initial_rest_s": 0,
+  "max_duration_s": 14400,
+  "comment": "Observe the open-circuit cell voltage for 4 hours. The tester is explicitly stopped before logging and no charge or discharge current is commanded. Select the cell when launching the test."
+}

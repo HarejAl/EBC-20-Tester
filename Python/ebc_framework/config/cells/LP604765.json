@@ -6,7 +6,7 @@
   "nominal_voltage_v": 3.7,
   "voltage": {
     "max_v": 4.20,
-    "min_v": 2.80,
+    "min_v": 2.75,
     "storage_v": 3.80
   },
   "current": {

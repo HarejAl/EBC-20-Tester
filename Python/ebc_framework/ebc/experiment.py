@@ -15,6 +15,7 @@ These produce the reference data your estimator is compared against.
 
 from __future__ import annotations
 import csv
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -24,14 +25,22 @@ from .device import EBCA20, SafetyLimits
 
 
 class DataLogger:
-    def __init__(self, path: str, extra_fields: Optional[list[str]] = None):
+    def __init__(self, path: str, extra_fields: Optional[list[str]] = None,
+                 append: bool = False):
         self.path = path
-        self._fh = open(path, "w", newline="")
         self._extra = extra_fields or []
+        has_data = append and os.path.isfile(path) and os.path.getsize(path) > 0
+        self._fh = open(path, "a" if append else "w", newline="")
         self._w = csv.writer(self._fh)
-        self._w.writerow(["t_s", "voltage_v", "current_a", "signed_current_a",
-                          "charge_ah", "mode"] + self._extra)
-        self.rows = 0
+        if not has_data:
+            self._w.writerow(["t_s", "voltage_v", "current_a",
+                              "signed_current_a", "charge_ah", "mode"] +
+                             self._extra)
+        if has_data:
+            with open(path, newline="") as existing:
+                self.rows = max(sum(1 for _ in existing) - 1, 0)
+        else:
+            self.rows = 0
 
     def log(self, m: Measurement, t_elapsed: float, **extra) -> None:
         self._w.writerow([
@@ -72,6 +81,25 @@ class ProfileController:
     _step_start: Optional[float] = field(default=None, init=False)
     _cycle: int = field(default=0, init=False)
     _last_cmd: Optional[float] = field(default=None, init=False)
+    _resume_step_elapsed_s: float = field(default=0.0, init=False)
+
+    def restore(self, state: dict) -> None:
+        """Restore a saved staircase position before starting a new run."""
+        if self.steps:
+            self._idx = min(max(int(state.get("step_index", 0)), 0),
+                            len(self.steps) - 1)
+        self._cycle = max(int(state.get("cycle", 0)), 0)
+        self._resume_step_elapsed_s = max(
+            float(state.get("step_elapsed_s", 0.0)), 0.0)
+        self._step_start = None
+        self._last_cmd = None
+
+    def snapshot(self, t_elapsed: float) -> dict:
+        elapsed = (t_elapsed - self._step_start
+                   if self._step_start is not None
+                   else self._resume_step_elapsed_s)
+        return {"step_index": self._idx, "cycle": self._cycle,
+                "step_elapsed_s": max(elapsed, 0.0)}
 
     def __call__(self, m: Measurement, t_elapsed: float) -> Optional[float]:
         # Check voltage alone, not paired with mode -- the device's own
@@ -82,7 +110,8 @@ class ProfileController:
             return float("nan")
 
         if self._step_start is None:
-            self._step_start = t_elapsed
+            self._step_start = t_elapsed - self._resume_step_elapsed_s
+            self._resume_step_elapsed_s = 0.0
 
         step = self.steps[self._idx]
         if t_elapsed - self._step_start >= step.duration_s:
@@ -125,6 +154,7 @@ class CapacityResult:
     duration_s: float
     v_start: float
     v_end: float
+    reason: str = ""
 
 
 def capacity_test(dev: EBCA20, current_a: float, v_cutoff: float,
@@ -175,4 +205,5 @@ def capacity_test(dev: EBCA20, current_a: float, v_cutoff: float,
         capacity_ah=state["q"], energy_wh=state["wh"],
         duration_s=state["t_prev"] or 0.0,
         v_start=state["v_start"] or 0.0, v_end=state["v_end"] or 0.0,
+        reason=reason,
     )

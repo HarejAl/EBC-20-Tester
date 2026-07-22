@@ -13,6 +13,12 @@ The `CELL` setting overrides the cell stored in the protocol. Therefore a
 protocol can omit `cell` or contain `"cell": ""`; selecting `CELL` in the
 launcher is then required. Set `CELL = None` to use the protocol's own cell.
 
+To pause a test, click the integrated terminal and press **Ctrl-C**. To resume
+later, set `SELECT_RESUME_FILE = True` in `runTestVSCode.py`, run it, and pick
+the interrupted CSV. The same CSV is extended after a fresh 10-second safety
+rest. Avoid VS Code's force-terminate button because it may prevent the final
+STOP command from reaching the tester.
+
 The remaining sections describe the equivalent terminal workflow.
 
 ## 1. Open a terminal
@@ -83,7 +89,7 @@ plotting automatically:
 ```
 
 It prints a live line per sample, saves the data to
-`results\<name>_<timestamp>.csv`, and a `..._meta.json` file next to it
+`results\<name>\<name>_<timestamp>.csv`, and a `..._meta.json` file next to it
 recording exactly what config produced that run.
 
 ## 6. Watch a test live (optional)
@@ -92,7 +98,7 @@ Open a **second** PowerShell window (repeat steps 1-2 in it), then once the
 first terminal has printed the output path:
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'examples\plot_log.py' 'results\<name>_<timestamp>.csv' --watch
+& 'C:\Users\alexa\anaconda3\python.exe' 'examples\plot_log.py' 'results\<name>\<name>_<timestamp>.csv' --watch
 ```
 
 ---
@@ -100,23 +106,30 @@ first terminal has printed the output path:
 # Paper protocols (`config\tests\paper\`)
 
 Run these in order. Each protocol's files are numbered so the sequence is
-unambiguous. Every command follows the same pattern as step 5 above — just
-the file name changes.
+unambiguous. The paper JSON files deliberately leave `"cell"` empty. Select
+the connected cell once in PowerShell and use the same value throughout a
+related protocol sequence:
+
+```powershell
+$cell = "LP604765"
+```
+
+Replace `LP604765` with any ID from `config\cells`. Every command below passes
+that selection with `--cell $cell`.
 
 ### Protocol 1 — Pseudo-OCV (Stage 0: electrode balancing)
 
 Precondition: fully charge the cell and let it rest ≥1h first.
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01_pseudo_ocv_discharge.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01_pseudo_ocv_discharge.json' --cell $cell --port COM5
 ```
-~20 hours. **Only if your cell is LFP**, also run the reverse direction and
-average the two curves to cancel hysteresis (edit `"cell"` in the file first
-if you're using a different LFP cell than `cellAlex`):
+~20 hours. **Only if your selected cell is LFP**, also run the reverse
+direction and average the two curves to reduce hysteresis:
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01b_pseudo_ocv_charge.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01b_pseudo_ocv_charge.json' --cell $cell --port COM5
 ```
-For NMC/NCA cells (`cellAlex` as currently set up), skip `01b`.
+For NMC/NCA cells, skip `01b`.
 
 ### Protocol 2 — CC discharges at 0.5C / 1C / 2C
 
@@ -124,20 +137,19 @@ Precondition: full charge before starting `02a`. Run all three in order —
 each one recharges the cell at the end, ready for the next:
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02a_cc_discharge_0p5C.json' --port COM5
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02b_cc_discharge_1C.json' --port COM5
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02c_cc_discharge_2C.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02a_cc_discharge_0p5C.json' --cell $cell --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02b_cc_discharge_1C.json' --cell $cell --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\02c_cc_discharge_2C.json' --cell $cell --port COM5
 ```
 ~1 day total. Run them one at a time, waiting for each to finish before
-starting the next. The 2C step is 14 A on `cellAlex` — confirmed within both
-the cell's own rating (20 A) and the EBC-A20's hardware ceiling (20 A), so it
-runs at the full 2C, not reduced.
+starting the next. The 2C request is automatically capped if it exceeds the
+selected cell's discharge rating or the EBC-A20's 20 A ceiling.
 
 ### Protocol 3 — Reduced HPPC-like pulse train
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\03a_pulse_train_precharge.json' --port COM5
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\03b_pulse_train.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\03a_pulse_train_precharge.json' --cell $cell --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\03b_pulse_train.json' --cell $cell --port COM5
 ```
 ~5 hours total (run `03a` first, wait for it to finish, then `03b`).
 **Note:** the EBC-A20 reports at a fixed ~1 Hz no matter what — it can't
@@ -148,8 +160,8 @@ separation to be less clean than a purpose-built potentiostat would give.
 ### Protocol 4 — Validation profile
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\04a_validation_prep_80pct.json' --port COM5
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\04b_validation_profile.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\04a_validation_prep_80pct.json' --cell $cell --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\04b_validation_profile.json' --cell $cell --port COM5
 ```
 ~2.5 hours total, run back-to-back (don't leave days between `04a` and `04b`
 or self-discharge drifts the SOC).
@@ -159,3 +171,43 @@ in a text editor and replace the placeholder `"profile"` array with your
 actual WLTP/UDDS-derived current trace or the synthetic multisine — the file
 as shipped only has a few illustrative dummy steps, not real data. This file
 is the held-out set the fit is judged on; never use it for fitting.
+
+## Run a complete subfolder automatically from VS Code
+
+Open `runFolderVSCode.py`, edit the settings at the top, and click **Run Python
+File**. `TEST_SUBFOLDER = "paper"` selects `config/tests/paper`, while
+`TEST_ORDER` defines which JSON files run and their exact order. Entries may
+omit the `.json` suffix and may be repeated. Insert `{"rest_min": 20}` anywhere
+in the list to add an explicit 20-minute zero-current rest. Set
+`TEST_ORDER = None` to run every JSON in filename order.
+`REST_BETWEEN_TESTS_MIN` is the default between adjacent tests with no explicit
+rest; set it to zero to use only rests written in the list. The script prints
+the complete plan and asks you to type `RUN` before a real-hardware sequence
+begins.
+
+Use `EXCLUDE_TESTS` for files that do not apply to the selected chemistry and
+`START_AT` when earlier files have already been completed. The sequence stops
+automatically after a safety event or keyboard interruption.
+
+Two optional finishing protocols are also available in the paper subfolder:
+`slow_finish_charge` applies a C/10 CC-CV top-off after a faster charge, while
+`slow_finish_discharge` applies a C/10 discharge to the selected cell's min_v
+after a faster discharge. Insert either name at the appropriate position in
+`TEST_ORDER`; their rates can be edited in the corresponding JSON files.
+
+## Resample irregular measurements
+
+New raw runs are grouped under `results/<protocol_name>/`. Raw CSV files are
+never modified by the resampling workflow.
+
+Open `resampleResults.py`, set `INPUT_PATH` to a CSV, a protocol result folder,
+or the top-level `results` folder, and choose `TARGET_PERIOD_S`. Keep
+`INPUT_PATH = None` to select one CSV with a file picker. Then click **Run
+Python File**.
+
+Processed CSVs and their processing metadata are written into a `resampled`
+subfolder beside the raw data. Voltage and other continuous numeric columns
+use linear interpolation by default. Current, signed current, accumulated
+charge, and mode use the previous measured value so current steps and charge
+counter resets are not turned into artificial ramps. These choices can be
+changed through `DEFAULT_NUMERIC_METHOD` and `COLUMN_METHODS`.

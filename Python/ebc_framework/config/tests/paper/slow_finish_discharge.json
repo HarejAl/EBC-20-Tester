@@ -1,0 +1,12 @@
+{
+  "name": "paper_slow_finish_discharge",
+  "type": "discharge",
+  "cell": "",
+  "description": "Slow C/10 finishing discharge after a faster discharge",
+  "sample_period_s": 5.0,
+  "initial_rest_s": 10,
+  "current_unit": "C",
+  "current": 0.1,
+  "max_duration_s": 43200,
+  "comment": "Select the cell at launch. Use after a faster discharge, ideally after a relaxation rest, to remove the remaining capacity gently at C/10 until the selected cell's min_v is reached. The 12h limit is a safety ceiling. Change current if a different finishing rate is required."
+}

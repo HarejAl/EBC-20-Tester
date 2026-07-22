@@ -1,11 +1,12 @@
 {
   "name": "paper_pseudo_ocv_discharge",
   "type": "discharge",
-  "cell": "cellAlex",
+  "cell": "",
   "description": "Stage 0: pseudo-OCV C/20 discharge for electrode balancing / OCP check",
   "sample_period_s": 30,
+  "initial_rest_s": 10,
   "current_unit": "C",
   "current": 0.05,
   "max_duration_s": 90000,
-  "comment": "C/20 discharge, full cell to min_v, ~20h expected duration (25h safety ceiling). Precondition: fully charge the cell and rest >=1h before starting this file. Sampling every 30s -- well above the EBC's hardware-fixed ~1Hz floor, plenty for a slow OCV sweep. This data is for OCV-SOC balancing only, deliberately down-weighted in the dynamic fit -- not used for kinetic parameters. NMC/NCA cells (cellAlex as configured): this discharge-only pass is normally sufficient. LFP cells: also run 01b_pseudo_ocv_charge.json in the opposite direction and average the two OCV curves to cancel hysteresis (Kang et al.)."
+  "comment": "Select the cell at launch. C/20 discharge from full charge to the selected cell's min_v; 25h safety ceiling. Precondition: fully charge the cell and rest >=1h. Sampling every 30s is sufficient for the slow OCV sweep. For NMC/NCA, this discharge pass is normally sufficient. For LFP, also run 01b_pseudo_ocv_charge.json from the discharged state and average the two curves to reduce hysteresis."
 }
