@@ -28,7 +28,8 @@ Not comfortable with a terminal? See **`HOW_TO_LAUNCH.md`** for an explicit,
 copy-paste walkthrough (opening PowerShell, finding the folder, exact
 commands) — including how to run the paper protocols in `config/tests/paper/`.
 
-1. Install Python 3.10+ and `pip install pyserial matplotlib`.
+1. Install Python 3.10+ and `pip install -r requirements.txt` from the
+   repository root (pyserial, numpy, matplotlib; scipy is optional).
 2. Run `python selftest.py` — it validates the protocol decoder, base-240
    encoding, and runs every test type on the built-in simulator. Should print
    `ALL CHECKS PASSED` / `CONFIG-DRIVEN CHECKS PASSED` with no hardware
@@ -73,11 +74,17 @@ config/
 examples/
   verify_protocol.py   one-time real-hardware decoder check (see above)
   verify_stop.py       confirms STOP actually halts an active discharge
-  run_dst_real.py      standalone DST script (no JSON needed)
   plot_log.py          plot a logged CSV, standalone or live (see below)
+ecm_characterization/  offline HPPC -> N-RC ECM fit, pseudo-OCV, validation
+                       (see its own README.md)
 launchTest.py    single CLI entry point -- run any JSON test, hardware or sim
+run*VSCode.py    edit-settings-and-click launchers (single test, whole folder,
+                 test + live BMS, ECM characterization, pseudo-OCV, validation)
+resampleResults.py  resample raw CSVs onto a uniform time grid
 results/<protocol>/  raw CSVs + metadata/checkpoints, grouped by protocol
 selftest.py      offline validation of the whole stack -- run this first
+selftest_*.py    focused offline regressions (link check, reconnect, recovery
+                 rest, capacity glitch, transport framing)
 ```
 
 ## Running a test
@@ -89,7 +96,7 @@ Open `runTestVSCode.py` and edit the settings at the top: `TEST`, `CELL`,
 top-right corner, or select **EBC-20: run configured test** in Run and Debug
 and press F5.
 
-`TEST` may be just the file stem (for example `"capacity_discharge"`). `CELL`
+`TEST` may be just the file stem (for example `"discharge"` or `"paper/02a_cc_discharge_0p5C"`). `CELL`
 is an ID from `config/cells`; it overrides the cell in the test. Set `CELL =
 None` when you want to use the test JSON's own cell.
 
@@ -142,6 +149,26 @@ DST step, HPPC pulse/rest position, or cycle sub-phase. A fresh 10-second
 zero-current safety rest always occurs before current is reapplied. Time spent
 offline counts toward an interrupted rest period, but not toward an active
 charge/discharge duration. Completed runs cannot be resumed accidentally.
+
+### Automatic reconnect after a dropped connection
+
+Real USB-serial connections occasionally drop mid-run (a CH340 driver hiccup,
+Windows suspending the port, a cable issue) -- long enough to matter on an
+unattended overnight test. On hardware runs, `launchTest.py` now catches
+this automatically: it waits (backing off from 5s up to 120s between
+attempts), reopens the port, and resumes from the same checkpoint `--resume`
+would use -- no manual restart needed. This is on by default; disable it
+with `--no-auto-reconnect`, or cap the attempts with
+`--reconnect-max-attempts N` (default: retry indefinitely). It never
+triggers on `--sim`. If a connection never comes back, it eventually gives
+up and leaves the checkpoint for a manual `--resume`, same as before this
+existed.
+
+If a test is *still* stopping every few hours even with this in place, that
+points at the port itself: in Device Manager, check Power Management on the
+USB-serial adapter and its parent USB hub(s) (uncheck "allow the computer to
+turn off this device to save power"), and disable system sleep for the
+duration of a run.
 
 ### Watching a run live
 
@@ -255,6 +282,23 @@ Three layers, all derived from the cell file:
 
 Set conservative bounds for your chemistry. Never leave a charging cell
 unattended.
+
+### Voltage-cutoff recovery rest
+
+Reaching the low-voltage boundary during discharge is treated as a normal,
+recoverable end-of-discharge condition rather than a completed useful pulse.
+The runner immediately sends STOP, repeatedly confirms zero measured current,
+and continues logging a 600-second zero-current recovery rest before ending
+the test. Set `"voltage_cutoff_rest_s"` in a test JSON to override the default.
+
+If execution is interrupted during this recovery, resume continues only its
+remaining duration; it does not restart the discharge or HPPC pulse. The
+checkpoint records `voltage cutoff reached`, allowing ECM characterization to
+reject the final interrupted HPPC pulse automatically.
+
+This does not weaken genuine fault handling. Measured overcurrent, hard
+overvoltage, and repeated command-state confirmation failure still STOP and
+abort immediately instead of continuing into an automatic rest.
 
 ## A real-hardware quirk worth knowing
 

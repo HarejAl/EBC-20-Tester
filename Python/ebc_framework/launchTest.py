@@ -15,7 +15,7 @@ Examples
   python launchTest.py config/tests/dst_validation.json --port COM3
 
   # Dry-run on the simulator (no hardware), fast:
-  python launchTest.py config/tests/capacity_discharge.json --sim --time-accel 500
+  python launchTest.py config/tests/discharge.json --cell LP604765 --sim --time-accel 500
 
   # List available cells:
   python launchTest.py --list-cells
@@ -26,6 +26,7 @@ test definition and cell parameters used, for reproducibility.
 """
 
 import argparse
+import copy
 import csv
 import dataclasses
 import json
@@ -147,6 +148,78 @@ def last_csv_time(path: str) -> float:
     return last
 
 
+# A run segment that survived this long counts as a recovered link, so a
+# later unrelated drop restarts its backoff from the beginning.
+HEALTHY_SEGMENT_S = 180.0
+
+
+def run_with_reconnect(dev, build_device, test, cell, logger, checkpoint,
+                       checkpoint_path, resume_state, save_progress, *,
+                       auto_reconnect: bool, backoff_s: float,
+                       max_attempts: int):
+    """Run the test; on a dropped hardware connection, reconnect and resume.
+
+    A dropped USB-serial connection (cable hiccup, driver reset, Windows
+    power management) surfaces as an OSError (pyserial's SerialException is
+    a subclass of it) from somewhere inside the polling loop. Rather than
+    letting that crash the whole script -- requiring the run to be noticed
+    and manually restarted with --resume -- reopen the port and resume from
+    the checkpoint the crashed attempt left behind, exactly as --resume
+    would, just triggered automatically instead of by hand. KeyboardInterrupt
+    is deliberately not treated as a connection drop.
+    """
+    attempt = 0
+    while True:
+        segment_started = time.monotonic()
+        try:
+            with dev:
+                try:
+                    return run_test(test, cell, dev, logger,
+                                    resume_state=resume_state,
+                                    progress=save_progress)
+                except KeyboardInterrupt:
+                    dev.stop()
+                    print("\nInterrupted -- device stopped. Resume later with "
+                          f"{checkpoint_path}")
+                    return None
+        except OSError as exc:
+            if not auto_reconnect:
+                raise
+            # Exponential backoff is meant to stop hammering a link that is
+            # persistently down -- not to punish a healthy run for a drop
+            # that happened hours ago. Without this reset the counter only
+            # ever grows, so by the sixth drop every later one waits the full
+            # 120 s cap even after hours of clean operation in between.
+            # Confirmed on hardware 2026-09-25: four drops in twenty minutes
+            # escalated 5s -> 10s -> 20s -> 40s with no recovery.
+            # Note this makes max_attempts count *consecutive* failures,
+            # which is the more useful reading of "give up".
+            if time.monotonic() - segment_started >= HEALTHY_SEGMENT_S:
+                attempt = 0
+            attempt += 1
+            if max_attempts and attempt > max_attempts:
+                print(f"\nConnection lost ({exc}); giving up after "
+                      f"{attempt - 1} reconnect attempt(s). Resume later "
+                      f"with {checkpoint_path}", file=sys.stderr)
+                raise
+            wait_s = min(backoff_s * (2 ** (attempt - 1)), 120.0)
+            print(f"\nConnection lost ({exc}). Reconnect attempt {attempt} "
+                  f"in {wait_s:g}s...", file=sys.stderr)
+            time.sleep(wait_s)
+            # The live snapshot is newer than the throttled disk checkpoint.
+            # Reloading the file here could repeat already-applied profile
+            # time (or extend a pulse) by up to one checkpoint interval.
+            resume_state = copy.deepcopy(checkpoint.get("runner_state", {}))
+            resume_state["csv_elapsed_s"] = max(
+                float(resume_state.get("csv_elapsed_s", 0.0)),
+                last_csv_time(checkpoint["csv_path"]))
+            resume_state["saved_at_epoch"] = checkpoint.get(
+                "saved_at_epoch", time.time())
+            dev = build_device()
+            print(f"Reconnected. Resuming: "
+                  f"{resume_state.get('stage', 'unknown stage')}")
+
+
 class PrintingLogger:
     """Wraps a DataLogger to also print each sample to the terminal."""
 
@@ -191,6 +264,16 @@ def main(argv=None):
                     help="open a plot that updates while the test runs")
     ap.add_argument("--list-cells", action="store_true",
                     help="list cells in the library and exit")
+    ap.add_argument("--no-auto-reconnect", dest="auto_reconnect",
+                    action="store_false", default=True,
+                    help="disable automatic reconnect/resume after a dropped "
+                    "hardware connection (default: on for hardware runs)")
+    ap.add_argument("--reconnect-backoff-s", type=float, default=5.0,
+                    help="initial delay before the first reconnect attempt; "
+                    "doubles each attempt up to 120s (default: 5)")
+    ap.add_argument("--reconnect-max-attempts", type=int, default=0,
+                    help="give up after this many consecutive reconnect "
+                    "attempts (0 = retry indefinitely, default)")
     args = ap.parse_args(argv)
 
     library = CellLibrary(args.cells_dir)
@@ -256,15 +339,19 @@ def main(argv=None):
           f"{min(cell.max_discharge_a, EBC_MAX_DISCHARGE_A):.3f} A")
 
     # build device
+    def build_device():
+        if args.sim:
+            return EBCA20.on_simulator(
+                limits=cell.safety_limits(),
+                capacity_ah=cell.nominal_capacity_ah,
+                soc0=args.sim_soc0, emit_period_s=0.0,
+                time_accel=args.time_accel)
+        return EBCA20.on_serial(args.port, limits=cell.safety_limits())
+
+    dev = build_device()
     if args.sim:
-        dev = EBCA20.on_simulator(
-            limits=cell.safety_limits(),
-            capacity_ah=cell.nominal_capacity_ah,
-            soc0=args.sim_soc0, emit_period_s=0.0,
-            time_accel=args.time_accel)
         print(f"Backend: SIMULATOR (time_accel={args.time_accel})")
     else:
-        dev = EBCA20.on_serial(args.port, limits=cell.safety_limits())
         print(f"Backend: SERIAL {args.port}")
 
     if checkpoint is not None:
@@ -280,7 +367,12 @@ def main(argv=None):
         out = os.path.join(
             protocol_results,
             f"{test.name}_{time.strftime('%Y%m%d_%H%M%S')}.csv")
-    logger = PrintingLogger(DataLogger(out, append=checkpoint is not None))
+    # Anything beyond a few sample periods is a dropout hole, not flowing
+    # current, so cumulative_ah must not integrate across it. Scaled off the
+    # test's own cadence because sample_period_s ranges from 1 s to 30 s.
+    logger = PrintingLogger(DataLogger(
+        out, append=checkpoint is not None,
+        max_gap_s=max(3.0 * test.sample_period_s, 5.0)))
 
     if args.live_plot:
         plot_script = os.path.join(os.path.dirname(__file__),
@@ -326,12 +418,14 @@ def main(argv=None):
     def save_progress(runner_state: dict) -> None:
         now = time.time()
         stage = runner_state.get("stage")
+        # Always retain the newest state for an in-process reconnect. Throttle
+        # only the comparatively expensive recovery-file write.
+        checkpoint["runner_state"] = copy.deepcopy(runner_state)
+        checkpoint["saved_at_epoch"] = now
+        checkpoint["complete"] = False
         if (stage == last_checkpoint_write["stage"] and
                 now - last_checkpoint_write["wall"] < CHECKPOINT_INTERVAL_S):
             return
-        checkpoint["runner_state"] = runner_state
-        checkpoint["saved_at_epoch"] = now
-        checkpoint["complete"] = False
         write_json_atomic(checkpoint_path, checkpoint)
         last_checkpoint_write.update({"wall": now, "stage": stage})
 
@@ -342,17 +436,12 @@ def main(argv=None):
         print(f"Resuming: {resume_state.get('stage', 'unknown stage')}")
     print("Running... (Ctrl-C to stop safely)\n")
     try:
-        with dev:
-            try:
-                result = run_test(test, cell, dev, logger,
-                                  resume_state=resume_state,
-                                  progress=save_progress)
-            except KeyboardInterrupt:
-                # Stop before the context manager closes the serial port.
-                dev.stop()
-                result = None
-                print("\nInterrupted -- device stopped. Resume later with "
-                      f"{checkpoint_path}")
+        result = run_with_reconnect(
+            dev, build_device, test, cell, logger, checkpoint,
+            checkpoint_path, resume_state, save_progress,
+            auto_reconnect=(not args.sim) and args.auto_reconnect,
+            backoff_s=args.reconnect_backoff_s,
+            max_attempts=args.reconnect_max_attempts)
     finally:
         logger.close()
 

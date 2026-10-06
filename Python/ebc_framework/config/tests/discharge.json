@@ -1,0 +1,10 @@
+{
+  "name": "discharge",
+  "type": "discharge",
+  "description": "Constant-current discharge to cutoff = SOH capacity measurement",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "current": 2,
+  "max_duration_s": 14400,
+  "comment": "Discharge at 2C to the cell's min_v (no cell set: select it at launch). Reported Ah is the usable-capacity (SOH) ground truth. Use a lower current (e.g. 0.5) for a capacity closer to nominal."
+}

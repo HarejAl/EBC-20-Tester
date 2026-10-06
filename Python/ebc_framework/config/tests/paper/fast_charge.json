@@ -1,0 +1,16 @@
+{
+  "name": "fast_charge",
+  "type": "charge",
+  "cell": "",
+  "description": "Fast 2C CC-CV charge to bring the cell back to full",
+  "sample_period_s": 5.0,
+  "initial_rest_s": 10,
+  "max_duration_s": 43200,
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 2,
+    "cutoff_c": 0.05,
+    "rest_after_s": 0
+  },
+  "comment": "Select the cell at launch. CC-CV charge at up to 2C to the selected cell's max_v, finishing when current tapers to 0.05C. The current is capped to the cell's max_charge_a and the EBC's 5 A ceiling. The 12h limit is a safety ceiling. Follow with slow_finish_charge if a fuller, gentler top-off is needed."
+}

@@ -1,0 +1,16 @@
+{
+  "name": "charge_to_4v2",
+  "type": "charge",
+  "cell": "LP604765",
+  "description": "CC-CV charge to 4.20 V at the cell's standard 1C rate, terminating on the cell's 0.05 A taper",
+  "sample_period_s": 1.0,
+  "max_duration_s": 10800,
+  "current_unit": "C",
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 1.0,
+    "v_max": 4.20,
+    "rest_after_s": 300
+  },
+  "comment": "1C = 1.900 A for LP604765 (standard_charge_a). Target 4.20 V is the cell's nominal max_v, not the 4.25 V hard limit. Taper current is omitted on purpose so termination uses the cell's own charge_taper_a (0.05 A ~= C/38)."
+}

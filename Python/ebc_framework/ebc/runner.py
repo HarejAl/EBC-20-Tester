@@ -2,7 +2,11 @@
 Test runner: turn a JSON test definition + cell library into an executed run.
 
 Supported test types:
-  - "dst"       : dynamic staircase current profile (SOC validation)
+  - "dst"       : dynamic staircase current profile (SOC validation). A
+                  custom "profile" is normally read as literal per-step
+                  C-rate; add "profile_peak_c_rate" to instead treat it as
+                  shape-only (normalized to its own peak magnitude) and
+                  rescale so the peak reaches that many C.
   - "charge"    : constant-current charge to the cell's max_v
   - "discharge" : constant-current discharge to min_v (SOH capacity)
   - "cycle"     : repeated charge / rest / discharge / rest
@@ -14,10 +18,19 @@ Supported test types:
                   be omitted (JSON null) for a charge-only or discharge-only
                   run. Optional "order" (default ["discharge", "charge"])
                   controls phase sequence -- set ["charge", "discharge"] to
-                  charge first. See config/tests/cellAlex_protocol.json.
+                  charge first. See config/tests/cellAlex_protocol.json. A
+                  "dst" discharge phase loops its staircase (repeat=None)
+                  until "v_min", then automatically continues to the rest
+                  and CC-CV charge phases. Its "c_rate" scales the built-in
+                  illustrative staircase; add a custom, shape-only "profile"
+                  (normalized to its own peak magnitude) to rescale that
+                  instead, so the peak reaches exactly "c_rate" C. See
+                  config/tests/dst_protocol_custom.json.
 
 Currents in test files are C-rate (current_unit="C") and scaled by the cell's
-nominal capacity, or absolute amps (current_unit="A").
+nominal capacity, or absolute amps (current_unit="A"). This literal scaling
+is bypassed by "profile_peak_c_rate" (dst) or a custom "profile" (protocol's
+dst discharge), both of which normalize to the profile's own peak instead.
 
 Every run derives SafetyLimits from the cell so the voltage/current bounds you
 defined in the cell JSON are enforced both software-side and (via cutoff fields)
@@ -34,7 +47,8 @@ from .celllib import Cell, CellLibrary
 from .device import EBCA20
 from .protocol import Measurement, PT_STATUS_CHARGE_END
 from .experiment import (DataLogger, ProfileController, ProfileStep,
-                         dst_profile, capacity_test, CapacityResult)
+                         dst_profile, profile_from_entries, capacity_test,
+                         CapacityResult)
 
 
 def _charge_target_v(config: dict, cell: Cell) -> float:
@@ -213,6 +227,80 @@ class RestController:
         return None
 
 
+# ---------------- startup link check (read path + write path) ----------------
+
+LINK_CHECK_VOLTAGE_MARGIN_FRACTION = 0.10
+LINK_CHECK_NO_RESPONSE_TIMEOUT_S = 5.0
+# The device emits a status frame only every ~1-2 s, and the first frame
+# after a start-discharge command still reports 0.000 A -- the current shows
+# up from the following frame on. Confirmed on real hardware 2026-09-25: a
+# 2.0 s window often saw just that one not-yet-ramped frame and wrongly
+# failed the write-path check on a perfectly working link. Keep the window
+# wide enough for several frames, and the budget above it so a short
+# initial_rest_s skips the check rather than truncating it.
+PULSE_CHECK_MIN_BUDGET_S = 7.0
+PULSE_CHECK_DURATION_S = 6.0
+PULSE_CHECK_CONFIRM_FRACTION = 0.3
+
+
+def _verify_link(dev: EBCA20, cell: Cell, on_sample) -> tuple[Measurement, float]:
+    """Confirm the read path is actually alive and sane: wait for one real
+    measurement (fast timeout, not the general in-run watchdog) and check
+    its voltage is physically plausible for this cell. Catches "connected"
+    but silently deaf/wrong-port/garbled-data situations in seconds instead
+    of the full test's max_duration_s.
+    """
+    captured: dict = {}
+
+    def controller(m: Measurement, t: float) -> Optional[float]:
+        captured["m"], captured["t"] = m, t
+        return float("nan")
+
+    dev.run(controller, period_s=0.5, max_duration_s=8.0, on_sample=on_sample,
+            no_response_timeout_s=LINK_CHECK_NO_RESPONSE_TIMEOUT_S)
+    m = captured.get("m")
+    if m is None:
+        raise RuntimeError("no measurement received during startup link check")
+    margin = LINK_CHECK_VOLTAGE_MARGIN_FRACTION * (cell.hard_max_v - cell.hard_min_v)
+    if not (cell.hard_min_v - margin <= m.voltage <= cell.hard_max_v + margin):
+        raise RuntimeError(
+            f"implausible voltage reading at startup: {m.voltage:.3f} V "
+            f"(expected roughly {cell.hard_min_v:.2f}-{cell.hard_max_v:.2f} V "
+            "for this cell) -- check wiring, the selected cell, and the COM "
+            "port before trusting this run")
+    return m, float(captured.get("t", 0.0))
+
+
+def _verify_pulse_response(dev: EBCA20, cell: Cell, on_sample) -> float:
+    """Confirm the write path actually works, not just reads: command a
+    brief C/10 discharge and require the device to report back a matching
+    discharge current before treating the connection as trustworthy.
+    """
+    pulse_a = cell.nominal_capacity_ah / 10.0
+    dev.set_discharge(pulse_a)
+    confirmed = {"ok": False, "t": 0.0}
+
+    def controller(m: Measurement, t: float) -> Optional[float]:
+        confirmed["t"] = t
+        if (m.mode == "discharge"
+                and m.current > PULSE_CHECK_CONFIRM_FRACTION * pulse_a):
+            confirmed["ok"] = True
+            return float("nan")
+        return None
+
+    dev.run(controller, period_s=0.3, max_duration_s=PULSE_CHECK_DURATION_S,
+            on_sample=on_sample,
+            no_response_timeout_s=LINK_CHECK_NO_RESPONSE_TIMEOUT_S)
+    dev.stop()
+    if not confirmed["ok"]:
+        raise RuntimeError(
+            f"commanded a {pulse_a:.3f} A (C/10) discharge pulse at startup "
+            "but the device never confirmed it -- current is being read but "
+            "commands don't appear to be taking effect; check the link "
+            "before trusting this run")
+    return float(confirmed["t"])
+
+
 # ---------------- cycle controller ----------------
 
 class CycleController:
@@ -343,6 +431,36 @@ class _OffsetLogger:
         return self._logger.rows
 
 
+class _TrackingLogger:
+    """Track the absolute last timestamp through nested offset loggers."""
+
+    def __init__(self, logger: DataLogger):
+        self._logger = logger
+        self.last_t = 0.0
+
+    def log(self, m: Measurement, t: float, **extra) -> None:
+        self.last_t = max(self.last_t, float(t))
+        self._logger.log(m, t, **extra)
+
+    @property
+    def rows(self) -> int:
+        return self._logger.rows
+
+
+class RecoveryRestController:
+    """Hold zero current and repeat STOP while measured current persists."""
+
+    def __init__(self, duration_s: float):
+        self.duration_s = float(duration_s)
+
+    def __call__(self, m: Measurement, t: float) -> Optional[float]:
+        if t >= self.duration_s:
+            return float("nan")
+        if m.mode != "idle" or abs(m.current) > 0.03:
+            return 0.0
+        return None
+
+
 def _run_protocol(test: "TestDef", cell: Cell, dev: EBCA20,
                   logger: DataLogger, resume_state: Optional[dict] = None,
                   progress: Optional[Callable[[dict, float], None]] = None
@@ -433,7 +551,11 @@ def _run_protocol(test: "TestDef", cell: Cell, dev: EBCA20,
             remaining_max_s = (max(float(phase_max_s) - prior_elapsed_s, 0.0)
                                if phase_max_s is not None else None)
             if proto == "dst":
-                steps = dst_profile(scale_a=amps)
+                # A custom "profile" is normalized to its own peak magnitude
+                # (the largest |current| step maps to c_rate); omit it to
+                # keep using the illustrative built-in staircase instead.
+                steps = (profile_from_entries(dcfg["profile"], amps)
+                         if "profile" in dcfg else dst_profile(scale_a=amps))
                 ctrl = ProfileController(steps=steps, repeat=None, v_min=v_min)
                 if saved_controller:
                     ctrl.restore(saved_controller)
@@ -567,9 +689,10 @@ class RunResult:
     cycle_capacities: Optional[list[float]] = None
 
 
-def run_test(test: TestDef, cell: Cell, dev: EBCA20,
-             logger: DataLogger, resume_state: Optional[dict] = None,
-             progress: Optional[Callable[[dict], None]] = None) -> RunResult:
+def _run_test_body(test: TestDef, cell: Cell, dev: EBCA20,
+                   logger: DataLogger, resume_state: Optional[dict] = None,
+                   progress: Optional[Callable[[dict], None]] = None
+                   ) -> RunResult:
     dev.limits = cell.safety_limits()
     period = test.sample_period_s
     t = test.type
@@ -594,9 +717,31 @@ def run_test(test: TestDef, cell: Cell, dev: EBCA20,
             logger.log(m, te)
 
         dev.stop()
+
+        # Spend part of the rest that was going to happen anyway on proving
+        # the link actually works, instead of silently trusting it: a read
+        # check (implausible/no voltage -> fails in seconds, not at
+        # max_duration_s) and, budget permitting, a real C/10 write-and-
+        # confirm pulse. Both consume time from initial_rest_s itself rather
+        # than adding to it.
+        link_measurement, link_check_elapsed_s = _verify_link(dev, cell, on_rest_sample)
+        print(f"  Link check OK: V={link_measurement.voltage:.3f} V")
+        remaining_after_link_s = max(initial_rest_s - link_check_elapsed_s, 0.0)
+        if remaining_after_link_s >= PULSE_CHECK_MIN_BUDGET_S:
+            pulse_check_elapsed_s = _verify_pulse_response(dev, cell, on_rest_sample)
+            print(f"  Write-path check OK: confirmed a "
+                  f"{cell.nominal_capacity_ah/10:.3f} A (C/10) discharge pulse")
+        else:
+            pulse_check_elapsed_s = 0.0
+            print(f"  Skipping write-path pulse check: initial_rest_s leaves "
+                  f"only {remaining_after_link_s:.1f}s (need "
+                  f"{PULSE_CHECK_MIN_BUDGET_S:g}s)")
+        dev.stop()
+        remaining_rest_s = max(
+            initial_rest_s - link_check_elapsed_s - pulse_check_elapsed_s, 0.0)
         rest_reason = dev.run(
-            RestController(initial_rest_s), period_s=period,
-            max_duration_s=initial_rest_s,
+            RestController(remaining_rest_s), period_s=period,
+            max_duration_s=remaining_rest_s,
             on_sample=on_rest_sample)
         if rest_reason not in ("controller requested stop",
                                "duration limit reached"):
@@ -656,9 +801,18 @@ def run_test(test: TestDef, cell: Cell, dev: EBCA20,
         return RunResult(test.name, cell.id, reason, logger.rows)
 
     if t == "dst":
-        steps = [ProfileStep(current_a=test.amps(s["current"], cell),
-                             duration_s=float(s["duration_s"]))
-                 for s in test.raw["profile"]]
+        # "profile_peak_c_rate" treats the profile's "current" values as
+        # normalized to their own peak magnitude and rescales so that peak
+        # reaches this many C, regardless of what units they're written in.
+        # Omit it to keep interpreting "current" as a literal C-rate per step.
+        peak_c_rate = test.raw.get("profile_peak_c_rate")
+        if peak_c_rate is not None:
+            steps = profile_from_entries(test.raw["profile"],
+                                         cell.c_to_amps(float(peak_c_rate)))
+        else:
+            steps = [ProfileStep(current_a=test.amps(s["current"], cell),
+                                 duration_s=float(s["duration_s"]))
+                     for s in test.raw["profile"]]
         ctrl = ProfileController(steps=steps,
                                  repeat=int(test.raw.get("repeat", 1)))
         saved_controller = dict(saved_main.get("controller_state", {}))
@@ -836,3 +990,102 @@ def run_test(test: TestDef, cell: Cell, dev: EBCA20,
                          cycle_capacities=ctrl.cycle_capacities)
 
     raise ValueError(f"unknown test type: {t}")
+
+
+def _is_recoverable_voltage_cutoff(test: TestDef, cell: Cell,
+                                   result: RunResult, dev: EBCA20) -> bool:
+    """Distinguish normal low-voltage termination from genuine hard faults."""
+    reason = result.reason.casefold()
+    if reason.startswith("safety stop: v_min"):
+        return True
+    if result.reason == "controller requested stop" and test.type in (
+            "hppc", "discharge"):
+        return True
+    if result.reason == "controller requested stop" and test.type == "dst":
+        target = _discharge_target_v(test.raw, "v_min", cell)
+        return dev.last is not None and dev.last.voltage <= target + 0.02
+    return False
+
+
+def run_test(test: TestDef, cell: Cell, dev: EBCA20,
+             logger: DataLogger, resume_state: Optional[dict] = None,
+             progress: Optional[Callable[[dict], None]] = None) -> RunResult:
+    """Run a test and finish recoverable voltage cutoffs with a safe rest.
+
+    Low-voltage termination is a normal end-of-discharge condition: STOP is
+    issued immediately and measurements continue for a default 600-second
+    recovery rest. Command mismatch, overcurrent, and hard overvoltage remain
+    aborting faults and never enter this path.
+    """
+    saved = resume_state or {}
+    tracked = _TrackingLogger(logger)
+    resuming_recovery = saved.get("stage") == "voltage_cutoff_recovery_rest"
+    recovery_elapsed = 0.0
+    if resuming_recovery:
+        tracked.last_t = float(saved.get("csv_elapsed_s", 0.0))
+        recovery_elapsed = float(saved.get("phase_elapsed_s", 0.0))
+        recovery_elapsed += max(
+            time.time()-float(saved.get("saved_at_epoch", time.time())), 0.0)
+        cutoff_reason = str(saved.get("cutoff_reason", "voltage cutoff reached"))
+        result = RunResult(test.name, cell.id, cutoff_reason, tracked.rows)
+        print("Resuming voltage-cutoff recovery rest.")
+    else:
+        result = _run_test_body(test, cell, dev, tracked, resume_state, progress)
+        if not _is_recoverable_voltage_cutoff(test, cell, result, dev):
+            return result
+        cutoff_reason = result.reason
+
+    recovery_s = float(test.raw.get("voltage_cutoff_rest_s", 600.0))
+    if recovery_s < 0:
+        raise ValueError("voltage_cutoff_rest_s cannot be negative")
+    remaining_recovery_s = max(recovery_s-recovery_elapsed, 0.0)
+    print(f"Voltage cutoff reached. STOP sent; recovery rest remaining: "
+          f"{remaining_recovery_s:g} s")
+    dev.stop()
+    if remaining_recovery_s == 0:
+        return RunResult(test.name, cell.id,
+                         ("voltage cutoff reached; recovery rest disabled"
+                          if recovery_s == 0 else
+                          f"voltage cutoff reached; recovery rest complete ({recovery_s:g} s)"),
+                         tracked.rows, result.capacity_ah,
+                         result.cycle_capacities)
+
+    # Ignore only the already-triggered low-voltage floor while commanding
+    # zero current. All other device safety checks and command confirmation
+    # remain active. RecoveryRestController repeats STOP if current persists.
+    original_v_min = dev.limits.v_min
+    rest_offset = tracked.last_t + test.sample_period_s
+    rest_logger = _OffsetLogger(tracked, rest_offset)
+    rest_last = {"value": 0.0}
+
+    def on_recovery_sample(m: Measurement, te: float) -> None:
+        rest_last["value"] = te
+        rest_logger.log(m, te)
+        if progress is not None:
+            progress({
+                "stage": "voltage_cutoff_recovery_rest",
+                "test_type": test.type,
+                "phase_elapsed_s": recovery_elapsed + te,
+                "csv_elapsed_s": rest_offset + te,
+                "cutoff_reason": cutoff_reason,
+            })
+
+    try:
+        dev.limits.v_min = -float("inf")
+        rest_reason = dev.run(
+            RecoveryRestController(remaining_recovery_s),
+            period_s=test.sample_period_s,
+            max_duration_s=remaining_recovery_s,
+            on_sample=on_recovery_sample)
+    finally:
+        dev.limits.v_min = original_v_min
+        dev.stop()
+
+    if rest_reason not in ("controller requested stop", "duration limit reached"):
+        reason = ("voltage cutoff reached; recovery rest failed: "
+                  f"{rest_reason}")
+    else:
+        reason = f"voltage cutoff reached; recovery rest complete ({recovery_s:g} s)"
+        print("Voltage-cutoff recovery rest complete.")
+    return RunResult(test.name, cell.id, reason, tracked.rows,
+                     result.capacity_ah, result.cycle_capacities)

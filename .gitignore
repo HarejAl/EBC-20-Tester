@@ -1,0 +1,18 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Measurement and analysis outputs (raw CSVs, checkpoints, fitted results)
+Python/ebc_framework/results/
+bms/results/
+bms/sensor_bias_study_v2/sensor_bias_framework/results/
+
+# Notebook checkpoints / editor clutter
+.ipynb_checkpoints/
+*.tmp
+
+# LaTeX build clutter
+*.aux
+*.out
+*.synctex.gz
+bms/sensor_bias_study_v2/sensor_bias_framework/paper/*.log

@@ -5,11 +5,12 @@ import os
 
 from launchTest import main
 
-
 # --------------------------- EDIT THESE SETTINGS ---------------------------
-
 # File name/stem from config/tests, or a full path to another test JSON.
-TEST = "hppc"
+# Paper sequence, run one at a time instead of via runFolderVSCode.py:
+#   "paper/02c_cc_discharge_2C", "paper/02b_cc_discharge_1C",
+#   "paper/03a_pulse_train_precharge", "paper/03b_pulse_train"
+TEST = "cc_cv_charge"
 
 # Cell ID from config/cells. Set to None to use the cell written in the test.
 # Setting an ID here always overrides the value in the test JSON.

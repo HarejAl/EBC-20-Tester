@@ -2,15 +2,15 @@
   "name": "paper_pseudo_ocv_charge",
   "type": "charge",
   "cell": "",
-  "description": "Stage 0 (LFP cells only): pseudo-OCV C/20 charge, opposite direction to 01_pseudo_ocv_discharge.json",
+  "description": "Stage 0 (LFP cells only): pseudo-OCV C/10 charge, opposite direction to 01_pseudo_ocv_discharge.json",
   "sample_period_s": 30,
   "initial_rest_s": 10,
   "max_duration_s": 90000,
   "charge": {
     "protocol": "cc_cv",
-    "c_rate": 0.05,
+    "c_rate": 0.1,
     "cutoff_c": 0.02,
     "rest_after_s": 0
   },
-  "comment": "LFP only: select the LFP cell at launch. Charge at C/20 from the fully discharged, >=1h-rested state to the selected cell's max_v, with a 0.02C taper cutoff. Average this trace with 01_pseudo_ocv_discharge.json to reduce voltage hysteresis. The EBC necessarily finishes with a CV/taper segment; trim that tail during OCV processing if required."
+  "comment": "LFP only: select the LFP cell at launch. Charge at C/10 from the fully discharged, >=1h-rested state to the selected cell's max_v, with a 0.02C taper cutoff. Use the same rate as 01_pseudo_ocv_discharge.json and average the two traces to reduce voltage hysteresis. The EBC necessarily finishes with a CV/taper segment; trim that tail during OCV processing if required."
 }

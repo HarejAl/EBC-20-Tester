@@ -132,12 +132,16 @@ _lib = CellLibrary(os.path.join(SCRIPT_DIR, "config", "cells"))
 print(f"  cells loaded: {', '.join(_lib.ids())}")
 
 _cfg = os.path.join(SCRIPT_DIR, "config", "tests")
+_capacity_case = ("capacity_discharge.json"
+                  if os.path.isfile(os.path.join(_cfg, "capacity_discharge.json"))
+                  else "discharge.json")
 _cases = [
     ("rest.json",             {"cell": "LP604765",
                                 "max_duration_s": 5}, 100.0,  0.7),
     ("dst_validation.json",   {"repeat": 2}, 60.0,   0.7),
     ("cc_cv_charge.json",     {},            600.0,  0.2),
-    ("capacity_discharge.json", {},          2000.0, 1.0),
+    (_capacity_case, {"cell": "INR18650-29E", "current": 0.5},
+                                              2000.0, 1.0),
 ]
 for fn, overrides, accel, soc0 in _cases:
     td = TestDef.load(os.path.join(_cfg, fn))

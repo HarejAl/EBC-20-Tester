@@ -49,6 +49,7 @@ class EBCA20:
     COMMAND_MISMATCH_SAMPLES = 3
     COMMAND_CONFIRM_SAMPLES = 2
     COMMAND_MAX_RETRIES = 3
+    MAX_POLL_INTERVAL_S = 1.0
 
     def __init__(self, transport, limits: Optional[SafetyLimits] = None):
         self._t = transport
@@ -71,9 +72,21 @@ class EBCA20:
         self._t.write(P.build_connect())
 
     def disconnect(self) -> None:
-        self.stop()
-        self._t.write(P.build_disconnect())
-        self._t.close()
+        """Best-effort goodbye, but the transport MUST close either way.
+
+        If the connection is already broken (which is exactly when a caller
+        is likely to be tearing down after an error), the STOP/DISCONNECT
+        writes below can themselves raise. Without the finally, that would
+        skip close() entirely and leak the underlying serial handle -- a
+        second connection attempt on the same port would then race a live
+        handle it doesn't know about for incoming bytes, silently starving
+        every read without ever raising an error.
+        """
+        try:
+            self.stop()
+            self._t.write(P.build_disconnect())
+        finally:
+            self._t.close()
 
     def __enter__(self):
         self.connect()
@@ -211,7 +224,8 @@ class EBCA20:
 
     def run(self, controller: Callable[[P.Measurement, float], Optional[float]],
             period_s: float = 1.0, max_duration_s: Optional[float] = None,
-            on_sample: Optional[Callable[[P.Measurement, float], None]] = None
+            on_sample: Optional[Callable[[P.Measurement, float], None]] = None,
+            no_response_timeout_s: Optional[float] = 15.0
             ) -> str:
         """
         Generic control loop.
@@ -225,16 +239,42 @@ class EBCA20:
         profile-step durations compress together with the cell physics. On real
         hardware time_accel is absent and t_elapsed is true wall-clock seconds.
 
+        no_response_timeout_s: a USB-serial link can go quiet -- zero bytes,
+        every read timing out -- without pyserial ever raising an exception.
+        Left unguarded, that reads as poll() always returning None: no
+        exception, no safety stop, no logged sample, forever. Raise an
+        actionable OSError once this many real seconds pass with no valid
+        measurement at all (reset by every one received), so a caller like
+        run_with_reconnect has something to catch and act on instead of
+        waiting on a link that will never recover on its own. None disables
+        this (the simulator, and any caller that truly wants to wait
+        indefinitely, e.g. a deliberately unattended long rest phase).
+
+        ``period_s`` controls controller/logging samples, not receive polling.
+        Link and safety checks run at least every MAX_POLL_INTERVAL_S on real
+        hardware, so a long CSV sampling period cannot trip the watchdog.
+
         Returns a string describing why the loop ended.
         """
         accel = getattr(self._t, "time_accel", 1.0) or 1.0
         t0 = time.time()
-        next_tick = t0
+        sample_interval_wall_s = period_s / accel
+        if sample_interval_wall_s <= 0:
+            raise ValueError("period_s must be positive")
+        poll_interval_wall_s = min(sample_interval_wall_s,
+                                   self.MAX_POLL_INTERVAL_S)
+        if no_response_timeout_s is not None:
+            poll_interval_wall_s = min(
+                poll_interval_wall_s,
+                max(float(no_response_timeout_s) / 3.0, 0.01))
+        next_sample = t0
+        last_response_wall = t0
         mismatch_samples = 0
         coherent_samples = 0
         command_retries = 0
         while True:
             now = time.time()
+            iteration_started = now
             t_elapsed = (now - t0) * accel
             if max_duration_s is not None and t_elapsed >= max_duration_s:
                 self.stop()
@@ -242,15 +282,26 @@ class EBCA20:
 
             m = self.poll()
             if m is not None:
+                sample_wall = time.time()
+                last_response_wall = sample_wall
                 reason = self.check_safety(m)
                 if reason is not None:
                     self.stop()
                     return f"safety stop: {reason}"
-                if on_sample is not None:
-                    on_sample(m, t_elapsed)
 
-                cmd = controller(m, t_elapsed)
-                if cmd is not None:
+                sample_due = sample_wall >= next_sample
+                cmd = None
+                if sample_due:
+                    t_elapsed = (sample_wall - t0) * accel
+                    if on_sample is not None:
+                        on_sample(m, t_elapsed)
+                    cmd = controller(m, t_elapsed)
+                    # If a read was delayed, skip missed ticks instead of
+                    # logging duplicate measurements to catch up.
+                    while next_sample <= sample_wall:
+                        next_sample += sample_interval_wall_s
+
+                if sample_due and cmd is not None:
                     if cmd != cmd:  # NaN sentinel = controller requests stop
                         self.stop()
                         return "controller requested stop"
@@ -284,7 +335,17 @@ class EBCA20:
                         self.set_current(requested)
                         mismatch_samples = 0
 
-            next_tick += period_s / accel
-            sleep = next_tick - time.time()
+            # Attempt the read first. A valid frame waiting at the timeout
+            # boundary must reset the watchdog rather than cause a false drop.
+            now = time.time()
+            if (no_response_timeout_s is not None
+                    and now - last_response_wall >= no_response_timeout_s):
+                raise OSError(
+                    f"no response from device within {no_response_timeout_s:g}s "
+                    "-- the serial link is open but nothing valid is coming "
+                    "back (check the COM port and that the device is "
+                    "powered on and linked)")
+
+            sleep = poll_interval_wall_s - (now - iteration_started)
             if sleep > 0:
                 time.sleep(sleep)

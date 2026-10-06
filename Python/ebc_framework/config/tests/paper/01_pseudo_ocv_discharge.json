@@ -2,11 +2,11 @@
   "name": "paper_pseudo_ocv_discharge",
   "type": "discharge",
   "cell": "",
-  "description": "Stage 0: pseudo-OCV C/20 discharge for electrode balancing / OCP check",
+  "description": "Stage 0: pseudo-OCV C/10 discharge for electrode balancing / OCP check",
   "sample_period_s": 30,
   "initial_rest_s": 10,
   "current_unit": "C",
-  "current": 0.05,
+  "current": 0.1,
   "max_duration_s": 90000,
-  "comment": "Select the cell at launch. C/20 discharge from full charge to the selected cell's min_v; 25h safety ceiling. Precondition: fully charge the cell and rest >=1h. Sampling every 30s is sufficient for the slow OCV sweep. For NMC/NCA, this discharge pass is normally sufficient. For LFP, also run 01b_pseudo_ocv_charge.json from the discharged state and average the two curves to reduce hysteresis."
+  "comment": "Select the cell at launch. C/10 discharge from full charge to the selected cell's min_v (~10 h); 25h safety ceiling. Precondition: fully charge the cell and rest >=1h. Sampling every 30s is sufficient for the slow OCV sweep. C/10 is faster but less equilibrated than the classic C/20 -- set current to 0.05 for C/20 (~20 h). For NMC/NCA, this discharge pass is normally sufficient. For LFP, also run 01b_pseudo_ocv_charge.json from the discharged state and average the two curves to reduce hysteresis."
 }

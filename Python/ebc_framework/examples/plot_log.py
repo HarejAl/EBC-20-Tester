@@ -1,8 +1,8 @@
 """
 Plot a logged EBC-A20 test CSV (voltage / signed current / charge vs time).
 
-Standalone -- just reads whatever launchTest.py or run_dst_real.py already
-wrote to disk. Run it after a test finishes for a one-shot plot, or with
+Standalone -- just reads whatever launchTest.py (or any of the VS Code launchers)
+already wrote to disk. Run it after a test finishes for a one-shot plot, or with
 --watch in a second terminal while the test is still running elsewhere, to
 refresh the plot periodically as new rows get appended.
 
@@ -125,7 +125,6 @@ def main():
             plt.pause(args.interval)
     except KeyboardInterrupt:
         pass
-
 
 if __name__ == "__main__":
     main()

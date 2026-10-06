@@ -1,0 +1,9 @@
+# Tester control (Python/ebc_framework)
+pyserial>=3.5
+matplotlib>=3.6
+# ECM characterization (Python/ebc_framework/ecm_characterization) and BMS (bms/)
+numpy>=1.23
+# Optional: load MATLAB .mat ECM models in the BMS
+scipy>=1.9
+# Optional, only for bms/sensor_bias_study_v2 (PyBaMM plant model):
+# pybamm

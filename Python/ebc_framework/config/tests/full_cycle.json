@@ -7,9 +7,9 @@
   "current_unit": "C",
   "repeat": 1,
   "max_duration_s": 86400,
-  "charge_current": 1,
-  "discharge_current": 1,
+  "charge_current": 2,
+  "discharge_current": 2,
   "rest_after_charge_s": 600,
   "rest_after_discharge_s": 600,
-  "comment": "one cycle = CC charge to max_v -> rest -> CC discharge to min_v -> rest. Capacity per cycle is logged for SOH fade curves."
+  "comment": "one cycle = CC charge at 2C to max_v -> 10 min rest -> CC discharge at 2C to min_v -> 10 min rest. Capacity per cycle is logged for SOH fade curves."
 }

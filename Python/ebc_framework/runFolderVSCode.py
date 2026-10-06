@@ -25,17 +25,18 @@ TEST_SUBFOLDER = "paper"
 # Reorder, omit, or repeat tests and rests as needed.
 # Set to None to run every JSON in the subfolder in filename order instead.
 TEST_ORDER = [
-    "01_pseudo_ocv_discharge",
-    {"rest_min": 20},
-    "01b_pseudo_ocv_charge",
-    {"rest_min": 20},
-    "02a_cc_discharge_0p5C",
-    "02b_cc_discharge_1C",
+    # "01_pseudo_ocv_discharge",
+    # {"rest_min": 10},
+    # "01b_pseudo_ocv_charge",
+    # {"rest_min": 10},
+    # "02a_cc_discharge_0p5C",
+    
     "02c_cc_discharge_2C",
+    "02b_cc_discharge_1C",
     "03a_pulse_train_precharge",
     "03b_pulse_train",
-    "04a_validation_prep_80pct",
-    "04b_validation_profile",
+    # "04a_validation_prep_80pct",
+    # "04b_validation_profile",
     # Optional finishing phases can be inserted wherever needed:
     # "slow_finish_charge",
     # "slow_finish_discharge",

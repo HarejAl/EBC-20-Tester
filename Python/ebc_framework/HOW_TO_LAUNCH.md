@@ -27,14 +27,14 @@ Press the Windows key, type `PowerShell`, press Enter. A terminal window opens.
 
 ## 2. Go to the project folder
 
-Copy-paste this line and press Enter:
+Copy-paste this line, replace `C:\path\to\EBC-20-Tester` with the folder you
+cloned the repository into, and press Enter:
 
 ```powershell
-cd "C:\Users\alexa\OneDrive - Politecnico di Milano\Desktop\Batteries\Tester\Python\ebc_framework"
+cd "C:\path\to\EBC-20-Tester\Python\ebc_framework"
 ```
 
-**If you don't know the folder's path** (e.g. you're on a different PC, or the
-project was moved): open the folder in File Explorer, click once in the
+**If you don't know the folder's path**: open the folder in File Explorer, click once in the
 address bar at the top (it turns into a text path), copy that text, and paste
 it between the quotes above in place of the path shown.
 
@@ -124,7 +124,7 @@ Precondition: fully charge the cell and let it rest ≥1h first.
 ```powershell
 & 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01_pseudo_ocv_discharge.json' --cell $cell --port COM5
 ```
-~20 hours. **Only if your selected cell is LFP**, also run the reverse
+~10 hours at the shipped C/10 rate (~20 hours if you set it to C/20). **Only if your selected cell is LFP**, also run the reverse
 direction and average the two curves to reduce hysteresis:
 ```powershell
 & 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\paper\01b_pseudo_ocv_charge.json' --cell $cell --port COM5
@@ -189,8 +189,10 @@ Use `EXCLUDE_TESTS` for files that do not apply to the selected chemistry and
 `START_AT` when earlier files have already been completed. The sequence stops
 automatically after a safety event or keyboard interruption.
 
-Two optional finishing protocols are also available in the paper subfolder:
-`slow_finish_charge` applies a C/10 CC-CV top-off after a faster charge, while
+Optional helper protocols are also available in the paper subfolder:
+`fast_charge` is a 2C CC-CV charge (capped to the cell/EBC limits) to bring
+the cell back to full quickly, `slow_finish_charge` applies a C/2 CC-CV
+top-off after a faster charge, while
 `slow_finish_discharge` applies a C/10 discharge to the selected cell's min_v
 after a faster discharge. Insert either name at the appropriate position in
 `TEST_ORDER`; their rates can be edited in the corresponding JSON files.

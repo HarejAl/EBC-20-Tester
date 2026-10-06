@@ -4,19 +4,19 @@
   "cell": "LP604765",
   "sample_period_s": 1.0,
   "max_duration_s": 21600,
-  "repeat": 10,
+  "repeat": 1,
   "discharge": {
     "protocol": "crate",
-    "c_rate": 1.0,
+    "c_rate": 2,
     "v_min": 2.8,
     "rest_after_s": 600
   },
   "charge": {
     "protocol": "cc_cv",
-    "c_rate": 1.0,
+    "c_rate": 2,
     "v_max": 4.2,
     "cutoff_c": 0.1,
     "rest_after_s": 600
   },
-  "comment": "10 cycles of: constant-current discharge at 1C to 2.8V, rest 10 min, CC-CV charge at 1C to 4.2V (0.1C taper cutoff), rest 10 min. Adjust c_rate to whatever discharge/charge rate you actually want -- 1C is just a sensible default here."
+  "comment": "1 cycle of: constant-current discharge at 2C to 2.8 V, rest 10 min, CC-CV charge at 2C to 4.2 V (0.1C taper cutoff), rest 10 min. Raise repeat for more cycles and adjust c_rate to the rates you actually want; currents are capped to the cell's limits and the EBC ceiling."
 }

@@ -18,5 +18,5 @@
     "max_duration_s": 21600,
     "rest_after_s": 600
   },
-  "comment": "Select the same cell used for 02a. Discharge at 1C to its min_v, log 30 min relaxation, then recharge at 0.5C to its max_v with a 0.02C taper and rest 10 min. Run after 02a and before 02c."
+  "comment": "Select the same cell used for 02a. Discharge at 1C to its min_v, log 30 min relaxation, then recharge at 1C to its max_v with a 0.02C taper and rest 10 min. Logged every 3 s. Run after 02a and before 02c."
 }

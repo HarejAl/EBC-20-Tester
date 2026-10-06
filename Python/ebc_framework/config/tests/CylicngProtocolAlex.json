@@ -18,5 +18,5 @@
     "cutoff_c": 0.02,
     "rest_after_s": 600
   },
-  "comment": "10 cycles of: constant-current (1C) discharge, 10 min rest, CC-CV (1C) charge, 10 min rest."
+  "comment": "10 cycles of: constant-current 1C discharge, 10 min rest, CC-CV 1C charge to 4.2 V (0.02C taper), 10 min rest. v_min 2.5 V is below cellAlex's hard_min_v (2.75 V), so the runner caps the discharge target to 2.75 V."
 }

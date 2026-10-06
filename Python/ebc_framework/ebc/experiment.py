@@ -18,35 +18,120 @@ import csv
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from .protocol import Measurement
 from .device import EBCA20, SafetyLimits
 
 
+# Default ceiling on a sample-to-sample gap that still counts as continuous
+# current flow when building cumulative_ah. Real dropouts observed on this
+# hardware were 9-25 s, so this must stay well under that; callers running a
+# slow sample_period_s raise it via DataLogger(max_gap_s=...).
+MAX_INTEGRATION_GAP_S = 5.0
+
+
 class DataLogger:
+    """Logs t_s (elapsed test time, what every analysis tool integrates and
+    resumes against) alongside wall_clock (real local time of the sample).
+
+    t_s stays the primary axis on purpose: it's monotonic across a resume
+    (offset-stitched) and is what characterize_hppc/validate_profile/the BMS
+    all assume. wall_clock is naturally continuous across a process restart
+    with no stitching needed, so a real stop-and-resume shows up as a large
+    wall_clock jump alongside a small/zero t_s jump -- exactly what marks
+    where a gap happened and how long the tester was actually down.
+    """
+
     def __init__(self, path: str, extra_fields: Optional[list[str]] = None,
-                 append: bool = False):
+                 append: bool = False,
+                 max_gap_s: float = MAX_INTEGRATION_GAP_S):
         self.path = path
         self._extra = extra_fields or []
+        self._max_gap_s = float(max_gap_s)
         has_data = append and os.path.isfile(path) and os.path.getsize(path) > 0
+        self._include_wall_clock = True
+        self._include_cumulative = True
+        self._cumulative_ah = 0.0
+        self._last_t: Optional[float] = None
+        self._last_signed_a = 0.0
+        if has_data:
+            with open(path, newline="") as existing:
+                header = next(csv.reader(existing), [])
+            # A file logged before this column existed keeps its old schema;
+            # mixing column counts within one CSV would corrupt it.
+            self._include_wall_clock = "wall_clock" in header
+            self._include_cumulative = "cumulative_ah" in header
+            if self._include_cumulative:
+                self._restore_cumulative(path)
         self._fh = open(path, "a" if append else "w", newline="")
         self._w = csv.writer(self._fh)
+        fields = ["t_s"]
+        if self._include_wall_clock:
+            fields.append("wall_clock")
+        fields += ["voltage_v", "current_a", "signed_current_a", "charge_ah"]
+        if self._include_cumulative:
+            fields.append("cumulative_ah")
+        fields.append("mode")
         if not has_data:
-            self._w.writerow(["t_s", "voltage_v", "current_a",
-                              "signed_current_a", "charge_ah", "mode"] +
-                             self._extra)
+            self._w.writerow(fields + self._extra)
         if has_data:
             with open(path, newline="") as existing:
                 self.rows = max(sum(1 for _ in existing) - 1, 0)
         else:
             self.rows = 0
 
+    def _restore_cumulative(self, path: str) -> None:
+        """Continue the running total across a resume or auto-reconnect."""
+        last = None
+        with open(path, newline="") as existing:
+            for row in csv.DictReader(existing):
+                last = row
+        if not last:
+            return
+        try:
+            self._cumulative_ah = float(last["cumulative_ah"])
+            self._last_t = float(last["t_s"])
+            self._last_signed_a = float(last["signed_current_a"])
+        except (KeyError, TypeError, ValueError):
+            self._cumulative_ah = 0.0
+            self._last_t = None
+            self._last_signed_a = 0.0
+
+    def _accumulate(self, signed_a: float, t_elapsed: float) -> None:
+        """Integrate charge over the interval that just ended.
+
+        Zero-order hold on the interval's *starting* current: the tester
+        holds a commanded setpoint until the next command, so the previous
+        sample's value is what actually flowed for that interval.
+
+        Gaps longer than max_gap_s are skipped rather than integrated. They
+        are reconnect holes, and no current flows across them -- confirmed on
+        hardware 2026-09-25, where voltage relaxed by the full IR drop during
+        a dropout -- so integrating would invent charge that never moved.
+        Measured dropouts were 9-25 s against a 1-2 s sample cadence, so the
+        threshold has to sit just above the normal cadence, not at some round
+        number well above it.
+        """
+        if self._last_t is not None:
+            dt = t_elapsed - self._last_t
+            if 0.0 < dt <= self._max_gap_s:
+                self._cumulative_ah += self._last_signed_a * dt / 3600.0
+        self._last_t = t_elapsed
+        self._last_signed_a = signed_a
+
     def log(self, m: Measurement, t_elapsed: float, **extra) -> None:
-        self._w.writerow([
-            f"{t_elapsed:.3f}", f"{m.voltage:.4f}", f"{m.current:.4f}",
-            f"{m.signed_current:.4f}", f"{m.charge:.5f}", m.mode,
-        ] + [extra.get(k, "") for k in self._extra])
+        row = [f"{t_elapsed:.3f}"]
+        if self._include_wall_clock:
+            row.append(datetime.now().isoformat(sep=" ", timespec="milliseconds"))
+        row += [f"{m.voltage:.4f}", f"{m.current:.4f}",
+               f"{m.signed_current:.4f}", f"{m.charge:.5f}"]
+        if self._include_cumulative:
+            self._accumulate(m.signed_current, t_elapsed)
+            row.append(f"{self._cumulative_ah:.6f}")
+        row.append(m.mode)
+        self._w.writerow(row + [extra.get(k, "") for k in self._extra])
         self.rows += 1
         # Flush every row (not batched) so a second process (e.g. plot_log.py
         # --watch) can tail this file live -- negligible overhead at the
@@ -145,6 +230,21 @@ def dst_profile(scale_a: float = 1.0) -> list[ProfileStep]:
     return [ProfileStep(current_a=p * scale_a, duration_s=d) for p, d in pattern]
 
 
+def profile_from_entries(entries: list[dict], peak_amps: float
+                         ) -> list[ProfileStep]:
+    """Build a staircase from JSON {"current", "duration_s"} entries whose
+    `current` is normalized to the profile's own peak magnitude (the largest
+    |current| in `entries` maps to `peak_amps`, regardless of what scale the
+    entries happen to be written in), rather than an absolute current."""
+    values = [float(e["current"]) for e in entries]
+    peak_magnitude = max((abs(v) for v in values), default=0.0)
+    if peak_magnitude <= 0:
+        raise ValueError("profile has no nonzero current entries to scale against")
+    return [ProfileStep(current_a=value / peak_magnitude * peak_amps,
+                        duration_s=float(entry["duration_s"]))
+            for entry, value in zip(entries, values)]
+
+
 # ----------------- reference measurements -----------------
 
 @dataclass
@@ -167,7 +267,17 @@ def capacity_test(dev: EBCA20, current_a: float, v_cutoff: float,
     """
     dev.limits.discharge_cutoff_v = v_cutoff
     state = {"q": 0.0, "wh": 0.0, "t_prev": None,
-             "v_start": None, "v_end": None, "discharging": False}
+             "v_start": None, "v_end": None, "discharging": False,
+             "non_discharge_streak": 0}
+    # A single misdecoded/corrupted status frame must never look like a
+    # legitimate end of discharge. Confirmed on real hardware 2026-07-25: one
+    # stray mode="unknown" sample (voltage never actually moved, current
+    # never actually rose) ended a 2C capacity test after ~1s instead of the
+    # expected ~30 min. Require several consecutive non-discharge samples --
+    # the same debounce philosophy already used for command confirmation
+    # elsewhere (see EBCA20.COMMAND_MISMATCH_SAMPLES) -- rather than trusting
+    # any one sample on its own.
+    NON_DISCHARGE_CONFIRM_SAMPLES = 3
 
     def ctrl(m: Measurement, t: float):
         if state["v_start"] is None:
@@ -181,17 +291,21 @@ def capacity_test(dev: EBCA20, current_a: float, v_cutoff: float,
         state["q"] = m.charge
         if m.mode == "discharge":
             state["discharging"] = True
+            state["non_discharge_streak"] = 0
         if m.voltage <= v_cutoff:
             return float("nan")
         # At high current the IR/RC voltage sag can be large enough that once
         # the device's own discharge_cutoff_v backstop auto-stops it, the
         # very next (now-relaxed, unloaded) sample rebounds back above
         # v_cutoff before we observe a sample at/below threshold -- so also
-        # stop once we see the device leave "discharge" mode after having
-        # genuinely been discharging, confirmed on the simulator 2026-07-01
-        # (cellAlex at 1C stalled the full max_duration_s without this).
+        # stop once the device has genuinely (not just momentarily) left
+        # "discharge" mode after having genuinely been discharging, confirmed
+        # on the simulator 2026-07-01 (cellAlex at 1C stalled the full
+        # max_duration_s without this).
         if state["discharging"] and m.mode != "discharge":
-            return float("nan")
+            state["non_discharge_streak"] += 1
+            if state["non_discharge_streak"] >= NON_DISCHARGE_CONFIRM_SAMPLES:
+                return float("nan")
         return None
 
     def on_sample(m, t):

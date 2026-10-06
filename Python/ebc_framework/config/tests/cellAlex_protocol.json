@@ -18,5 +18,5 @@
     "cutoff_c": 0.02,
     "rest_after_s": 300
   },
-  "comment": "discharge: built-in DST staircase scaled by 2C, looped until 3.0V, then rest 5 min. charge: CC-CV at 1C to 4.2V with 0.02C taper cutoff, then rest 5 min. Repeated 3 times. Set discharge or charge to null to skip that phase (charge-only or discharge-only). Any C-rate that would exceed the cell's own rating or the EBC's own hardware ceiling (5A charge / 20A discharge) is silently clamped -- check the logged current, not just this file, to see what was actually applied."
+  "comment": "discharge: built-in DST staircase scaled by 3C, looped until v_min, then rest 5 min. v_min 2.5 V is below cellAlex's hard_min_v (2.75 V), so the runner caps it to 2.75 V. charge: CC-CV at 1C to 4.2V with 0.02C taper cutoff, then rest 5 min. Repeated 3 times. Set discharge or charge to null to skip that phase (charge-only or discharge-only). Any C-rate that would exceed the cell's own rating or the EBC's own hardware ceiling (5A charge / 20A discharge) is silently clamped -- check the logged current, not just this file, to see what was actually applied."
 }
