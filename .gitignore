@@ -16,3 +16,16 @@ bms/sensor_bias_study_v2/sensor_bias_framework/results/
 *.out
 *.synctex.gz
 bms/sensor_bias_study_v2/sensor_bias_framework/paper/*.log
+
+# Local-only analysis tools (ECM fitting, BMS/SOC estimation, resampling).
+# Kept on disk but not distributed with the tester-control repository.
+bms/
+Python/ebc_framework/ecm_characterization/
+Python/ebc_framework/resampleResults.py
+Python/ebc_framework/runCharacterizationVSCode.py
+Python/ebc_framework/runPseudoOcvVSCode.py
+Python/ebc_framework/runValidationVSCode.py
+Python/ebc_framework/runTestWithBMSVSCode.py
+
+# Local Claude Code settings
+.claude/

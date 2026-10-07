@@ -53,12 +53,11 @@ PORT = "COM5"
 # or after the final test. Set to 0 to use only rests written in TEST_ORDER.
 REST_BETWEEN_TESTS_MIN = 20.0
 
-# Keep False for the real tester. Set True for an offline simulator run.
-SIMULATOR = False
-TIME_ACCEL = 100.0
-SIMULATOR_INITIAL_SOC = 0.8
+# True: each test writes CSV + metadata + checkpoint under results/.
+# False: samples are only printed in the terminal (nothing saved, no resume).
+SAVE_DATA = True
 
-# A live-plot window is opened for every test when True. Close old plot
+# A live-plot window is opened for every test when True (needs SAVE_DATA). Close old plot
 # windows yourself; they are separate processes and otherwise remain open.
 LIVE_PLOT = False
 
@@ -71,7 +70,6 @@ START_AT = None
 EXCLUDE_TESTS = set()
 
 # Print the complete plan and require typing RUN before controlling hardware.
-# Simulator runs never ask for confirmation.
 REQUIRE_CONFIRMATION = True
 
 # Stop the complete sequence if a protocol reports a safety stop.
@@ -165,15 +163,9 @@ def describe_test(path: str) -> str:
 
 
 def build_arguments(path: str) -> list[str]:
-    args = [path, "--cell", CELL]
-    if SIMULATOR:
-        args += [
-            "--sim",
-            "--time-accel", str(TIME_ACCEL),
-            "--sim-soc0", str(SIMULATOR_INITIAL_SOC),
-        ]
-    else:
-        args += ["--port", PORT]
+    args = [path, "--cell", CELL, "--port", PORT]
+    if not SAVE_DATA:
+        args.append("--no-save")
     if LIVE_PLOT:
         args.append("--live-plot")
     return args
@@ -208,7 +200,8 @@ def main() -> None:
     print("Batch test plan")
     print(f"  Folder: {os.path.dirname(paths[0])}")
     print(f"  Cell: {CELL}")
-    print(f"  Backend: {'SIMULATOR' if SIMULATOR else PORT}")
+    print(f"  Port: {PORT}")
+    print(f"  Save data: {'yes' if SAVE_DATA else 'NO (terminal only)'}")
     print(f"  Inter-test rest: {REST_BETWEEN_TESTS_MIN:g} min")
     test_number = 0
     for step in steps:
@@ -219,7 +212,7 @@ def main() -> None:
             print(f"  {test_number:02d}. {os.path.basename(step)} - "
                   f"{describe_test(step)}")
 
-    if REQUIRE_CONFIRMATION and not SIMULATOR:
+    if REQUIRE_CONFIRMATION:
         answer = input("\nType RUN to start this complete sequence: ").strip()
         if answer != "RUN":
             raise SystemExit("Batch cancelled.")

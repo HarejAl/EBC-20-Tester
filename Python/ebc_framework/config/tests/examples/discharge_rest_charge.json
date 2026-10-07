@@ -1,0 +1,23 @@
+{
+  "name": "discharge_rest_charge",
+  "type": "protocol",
+  "description": "Discharge at 1C to 3.0 V, rest, CC-CV recharge to 4.2 V, rest; 2 cycles",
+  "sample_period_s": 1.0,
+  "max_duration_s": 21600,
+  "repeat": 2,
+  "order": ["discharge", "charge"],
+  "discharge": {
+    "protocol": "crate",
+    "c_rate": 1.0,
+    "v_min": 3.0,
+    "rest_after_s": 900
+  },
+  "charge": {
+    "protocol": "cc_cv",
+    "c_rate": 0.5,
+    "v_max": 4.2,
+    "cutoff_c": 0.05,
+    "rest_after_s": 900
+  },
+  "comment": "Two cycles of: 1C discharge to 3.0 V, 15 min rest, 0.5C CC-CV charge to 4.2 V with 0.05C taper, 15 min rest. Select the cell at launch."
+}

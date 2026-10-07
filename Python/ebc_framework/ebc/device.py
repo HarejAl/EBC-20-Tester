@@ -1,7 +1,7 @@
 """
 High-level EBC-A20 controller.
 
-This is the API your experiments use. It wraps a transport (real or simulator),
+This is the API your experiments use. It wraps the serial transport,
 handles connect/handshake, exposes set_discharge / set_charge / stop, and runs a
 polling loop that decodes status frames into Measurement objects.
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from . import protocol as P
-from .transport import SerialTransport, SimulatorTransport
+from .transport import SerialTransport
 
 
 @dataclass
@@ -62,10 +62,6 @@ class EBCA20:
     @classmethod
     def on_serial(cls, port: str, limits: Optional[SafetyLimits] = None):
         return cls(SerialTransport(port), limits)
-
-    @classmethod
-    def on_simulator(cls, limits: Optional[SafetyLimits] = None, **sim_kwargs):
-        return cls(SimulatorTransport(**sim_kwargs), limits)
 
     # ---- lifecycle ----
     def connect(self) -> None:
@@ -234,10 +230,9 @@ class EBCA20:
               or None to keep the present setpoint, or float('nan') to stop.
           on_sample(measurement, t_elapsed) -> called for logging each sample.
 
-        Time base: if the transport exposes a `time_accel` (the simulator),
-        the elapsed time handed to the controller is accelerated so that
-        profile-step durations compress together with the cell physics. On real
-        hardware time_accel is absent and t_elapsed is true wall-clock seconds.
+        Time base: t_elapsed is wall-clock seconds. A transport may expose a
+        `time_accel` factor (only the offline test fake in tests/ does) to
+        compress profile durations; the real serial transport never does.
 
         no_response_timeout_s: a USB-serial link can go quiet -- zero bytes,
         every read timing out -- without pyserial ever raising an exception.
@@ -247,7 +242,7 @@ class EBCA20:
         measurement at all (reset by every one received), so a caller like
         run_with_reconnect has something to catch and act on instead of
         waiting on a link that will never recover on its own. None disables
-        this (the simulator, and any caller that truly wants to wait
+        this (the offline test fake, and any caller that truly wants to wait
         indefinitely, e.g. a deliberately unattended long rest phase).
 
         ``period_s`` controls controller/logging samples, not receive polling.

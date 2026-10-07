@@ -2,10 +2,11 @@
 
 ## Easiest: launch from VS Code
 
-1. Open this project folder in VS Code.
+1. Open the `Python/ebc_framework` folder in VS Code.
 2. Open `runTestVSCode.py`.
 3. Change the settings at the top of the file (`TEST`, `CELL`, `PORT`,
-   `SIMULATOR`, and `LIVE_PLOT`).
+   `SAVE_DATA`, and `LIVE_PLOT`). `SAVE_DATA = False` only prints the
+   measurements in the terminal and writes nothing to disk.
 4. Click **Run Python File** at the top right. Alternatively, open **Run and
    Debug**, choose **EBC-20: run configured test**, and press F5.
 
@@ -57,17 +58,20 @@ every command below.
 
 ## 4. Confirm the setup works (do this once, on a new machine)
 
+Optionally, check the installation first. This runs the offline regression
+tests and needs no hardware:
+
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'selftest.py'
+& 'C:\Users\alexa\anaconda3\python.exe' 'tests\run_all.py'
 ```
-Should print `ALL CHECKS PASSED`. No hardware needed for this step.
+It should print `ALL OFFLINE TESTS PASSED`.
 
 Then, with the EBC-A20 connected over USB, run the 2-minute connection test
 (60s discharge at 0.5A, then 60s charge at 0.5A) to confirm the cable/port and
 that both discharge and charge commands actually drive the cell:
 
 ```powershell
-& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\connection_test.json' --port COM5
+& 'C:\Users\alexa\anaconda3\python.exe' 'launchTest.py' 'config\tests\connection_test.json' --cell LP604765 --port COM5
 ```
 
 Swap `COM5` for your actual port — check Device Manager → Ports (COM & LPT)
@@ -90,7 +94,8 @@ plotting automatically:
 
 It prints a live line per sample, saves the data to
 `results\<name>\<name>_<timestamp>.csv`, and a `..._meta.json` file next to it
-recording exactly what config produced that run.
+recording exactly what config produced that run. Add `--no-save` to only
+print the samples without writing any file (such a run cannot be resumed).
 
 ## 6. Watch a test live (optional)
 
@@ -196,20 +201,3 @@ top-off after a faster charge, while
 `slow_finish_discharge` applies a C/10 discharge to the selected cell's min_v
 after a faster discharge. Insert either name at the appropriate position in
 `TEST_ORDER`; their rates can be edited in the corresponding JSON files.
-
-## Resample irregular measurements
-
-New raw runs are grouped under `results/<protocol_name>/`. Raw CSV files are
-never modified by the resampling workflow.
-
-Open `resampleResults.py`, set `INPUT_PATH` to a CSV, a protocol result folder,
-or the top-level `results` folder, and choose `TARGET_PERIOD_S`. Keep
-`INPUT_PATH = None` to select one CSV with a file picker. Then click **Run
-Python File**.
-
-Processed CSVs and their processing metadata are written into a `resampled`
-subfolder beside the raw data. Voltage and other continuous numeric columns
-use linear interpolation by default. Current, signed current, accumulated
-charge, and mode use the previous measured value so current steps and charge
-counter resets are not turned into artificial ramps. These choices can be
-changed through `DEFAULT_NUMERIC_METHOD` and `COLUMN_METHODS`.

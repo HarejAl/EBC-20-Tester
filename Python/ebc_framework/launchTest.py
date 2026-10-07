@@ -3,26 +3,25 @@
 launchTest.py — one entry point to run any JSON-defined battery test.
 
 Loads a test definition, resolves its cell from the cell library, applies the
-cell's voltage/current safety bounds, and executes it on either the real
-EBC-A20 or the built-in simulator.
+cell's voltage/current safety bounds, and executes it on the EBC-A20.
 
 Examples
 --------
-  # Run the DST validation test on the real device (Linux):
-  python launchTest.py config/tests/dst_validation.json --port /dev/ttyUSB0
+  # Windows:
+  python launchTest.py config/tests/hppc.json --cell LP604765 --port COM5
 
-  # Same on Windows:
-  python launchTest.py config/tests/dst_validation.json --port COM3
+  # Linux:
+  python launchTest.py hppc --cell LP604765 --port /dev/ttyUSB0
 
-  # Dry-run on the simulator (no hardware), fast:
-  python launchTest.py config/tests/discharge.json --cell LP604765 --sim --time-accel 500
+  # Watch the run without writing anything to disk:
+  python launchTest.py connection_test --cell LP604765 --port COM5 --no-save
 
   # List available cells:
   python launchTest.py --list-cells
 
-Output: a timestamped CSV (t, V, I, charge, mode) under
+Output (unless --no-save): a timestamped CSV (t, V, I, charge, mode) under
 results/<protocol_name>/, plus a sibling <name>_meta.json capturing the exact
-test definition and cell parameters used, for reproducibility.
+test definition and cell parameters used, and a _checkpoint.json for resume.
 """
 
 import argparse
@@ -137,7 +136,7 @@ def write_json_atomic(path: str, data: dict) -> bool:
 def last_csv_time(path: str) -> float:
     """Return the last valid logged timestamp, or zero for an empty CSV."""
     last = 0.0
-    if not os.path.isfile(path):
+    if not path or not os.path.isfile(path):
         return last
     with open(path, newline="") as fh:
         for row in csv.DictReader(fh):
@@ -179,8 +178,12 @@ def run_with_reconnect(dev, build_device, test, cell, logger, checkpoint,
                                     progress=save_progress)
                 except KeyboardInterrupt:
                     dev.stop()
-                    print("\nInterrupted -- device stopped. Resume later with "
-                          f"{checkpoint_path}")
+                    if checkpoint_path:
+                        print("\nInterrupted -- device stopped. Resume later "
+                              f"with {checkpoint_path}")
+                    else:
+                        print("\nInterrupted -- device stopped. Data was not "
+                              "being saved, so this run cannot be resumed.")
                     return None
         except OSError as exc:
             if not auto_reconnect:
@@ -198,9 +201,12 @@ def run_with_reconnect(dev, build_device, test, cell, logger, checkpoint,
                 attempt = 0
             attempt += 1
             if max_attempts and attempt > max_attempts:
+                resume_hint = (f"Resume later with {checkpoint_path}"
+                               if checkpoint_path else "Data was not being "
+                               "saved, so this run cannot be resumed.")
                 print(f"\nConnection lost ({exc}); giving up after "
-                      f"{attempt - 1} reconnect attempt(s). Resume later "
-                      f"with {checkpoint_path}", file=sys.stderr)
+                      f"{attempt - 1} reconnect attempt(s). {resume_hint}",
+                      file=sys.stderr)
                 raise
             wait_s = min(backoff_s * (2 ** (attempt - 1)), 120.0)
             print(f"\nConnection lost ({exc}). Reconnect attempt {attempt} "
@@ -218,6 +224,19 @@ def run_with_reconnect(dev, build_device, test, cell, logger, checkpoint,
             dev = build_device()
             print(f"Reconnected. Resuming: "
                   f"{resume_state.get('stage', 'unknown stage')}")
+
+
+class NullLogger:
+    """Stands in for DataLogger when the user chose not to save data."""
+
+    def __init__(self) -> None:
+        self.rows = 0
+
+    def log(self, m, t_elapsed, **extra) -> None:
+        self.rows += 1
+
+    def close(self) -> None:
+        pass
 
 
 class PrintingLogger:
@@ -249,13 +268,12 @@ def main(argv=None):
                     help="continue an interrupted run from its checkpoint")
     ap.add_argument("--cell",
                     help="cell ID to use; overrides the test JSON's cell")
-    ap.add_argument("--port", help="serial port of the real EBC-A20")
-    ap.add_argument("--sim", action="store_true",
-                    help="use the simulator instead of hardware")
-    ap.add_argument("--time-accel", type=float, default=1.0,
-                    help="simulator time acceleration (sim only)")
-    ap.add_argument("--sim-soc0", type=float, default=0.8,
-                    help="simulator initial SOC (sim only)")
+    ap.add_argument("--port", help="serial port of the EBC-A20 "
+                    "(e.g. COM5 or /dev/ttyUSB0)")
+    ap.add_argument("--no-save", dest="save", action="store_false",
+                    default=True,
+                    help="only print samples to the terminal; write no CSV, "
+                    "metadata or checkpoint (the run cannot be resumed)")
     ap.add_argument("--cells-dir", default=CELLS_DIR,
                     help="directory of cell JSON files")
     ap.add_argument("--out", help="output CSV path "
@@ -290,8 +308,15 @@ def main(argv=None):
         ap.error("a test JSON path or --resume file is required")
     if args.test and args.resume:
         ap.error("specify either a test or --resume, not both")
-    if not args.sim and not args.port:
-        ap.error("specify --port for hardware, or --sim for the simulator")
+    if not args.port:
+        ap.error("specify --port, the tester's serial port (e.g. COM5)")
+    if not args.save:
+        if args.resume:
+            ap.error("--no-save cannot be combined with --resume")
+        if args.out:
+            ap.error("--no-save cannot be combined with --out")
+        if args.live_plot:
+            ap.error("--live-plot reads the saved CSV; drop --no-save to use it")
 
     checkpoint = None
     checkpoint_path = None
@@ -340,21 +365,19 @@ def main(argv=None):
 
     # build device
     def build_device():
-        if args.sim:
-            return EBCA20.on_simulator(
-                limits=cell.safety_limits(),
-                capacity_ah=cell.nominal_capacity_ah,
-                soc0=args.sim_soc0, emit_period_s=0.0,
-                time_accel=args.time_accel)
         return EBCA20.on_serial(args.port, limits=cell.safety_limits())
 
-    dev = build_device()
-    if args.sim:
-        print(f"Backend: SIMULATOR (time_accel={args.time_accel})")
-    else:
-        print(f"Backend: SERIAL {args.port}")
+    try:
+        dev = build_device()
+    except OSError as exc:
+        ap.error(f"could not open serial port {args.port}: {exc}. Check that "
+                 "the tester is plugged in and powered, and the port number "
+                 "(Windows: Device Manager > Ports (COM & LPT)).")
+    print(f"Port:  {args.port}")
 
-    if checkpoint is not None:
+    if not args.save:
+        out = ""
+    elif checkpoint is not None:
         out = checkpoint["csv_path"]
         if args.out and os.path.abspath(args.out) != os.path.abspath(out):
             ap.error("--out cannot change the CSV of a resumed run")
@@ -372,7 +395,8 @@ def main(argv=None):
     # test's own cadence because sample_period_s ranges from 1 s to 30 s.
     logger = PrintingLogger(DataLogger(
         out, append=checkpoint is not None,
-        max_gap_s=max(3.0 * test.sample_period_s, 5.0)))
+        max_gap_s=max(3.0 * test.sample_period_s, 5.0))
+        if args.save else NullLogger())
 
     if args.live_plot:
         plot_script = os.path.join(os.path.dirname(__file__),
@@ -386,16 +410,22 @@ def main(argv=None):
     # Write metadata now, before the run starts -- not after it finishes.
     # An early-terminated run (killed terminal, power loss, crash) still
     # leaves you knowing exactly what config produced the partial CSV.
-    meta_path = os.path.splitext(out)[0] + "_meta.json"
-    if checkpoint is None:
+    meta_path = os.path.splitext(out)[0] + "_meta.json" if args.save else None
+    if not args.save:
+        # Same in-memory checkpoint as a saved run, so an automatic reconnect
+        # still resumes correctly -- it is just never written to disk.
+        checkpoint = {
+            "version": 1, "complete": False, "csv_path": "",
+            "runner_state": {"stage": "not_started", "csv_elapsed_s": 0.0},
+        }
+    elif checkpoint is None:
         with open(meta_path, "w") as fh:
             json.dump({
             "test": test.raw,
             "cell": dataclasses.asdict(cell),
             "run": {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "backend": (f"simulator (time_accel={args.time_accel})"
-                           if args.sim else f"serial {args.port}"),
+                "backend": f"serial {args.port}",
                 "selected_cell_id": cell.id,
                 "csv_file": os.path.basename(out),
             },
@@ -423,15 +453,20 @@ def main(argv=None):
         checkpoint["runner_state"] = copy.deepcopy(runner_state)
         checkpoint["saved_at_epoch"] = now
         checkpoint["complete"] = False
+        if not args.save:
+            return
         if (stage == last_checkpoint_write["stage"] and
                 now - last_checkpoint_write["wall"] < CHECKPOINT_INTERVAL_S):
             return
         write_json_atomic(checkpoint_path, checkpoint)
         last_checkpoint_write.update({"wall": now, "stage": stage})
 
-    print(f"Output: {out}")
-    print(f"Metadata: {meta_path}")
-    print(f"Checkpoint: {checkpoint_path}")
+    if args.save:
+        print(f"Output: {out}")
+        print(f"Metadata: {meta_path}")
+        print(f"Checkpoint: {checkpoint_path}")
+    else:
+        print("Output: NOT SAVED (--no-save) -- samples are only printed")
     if resume_state is not None:
         print(f"Resuming: {resume_state.get('stage', 'unknown stage')}")
     print("Running... (Ctrl-C to stop safely)\n")
@@ -439,19 +474,22 @@ def main(argv=None):
         result = run_with_reconnect(
             dev, build_device, test, cell, logger, checkpoint,
             checkpoint_path, resume_state, save_progress,
-            auto_reconnect=(not args.sim) and args.auto_reconnect,
+            auto_reconnect=args.auto_reconnect,
             backoff_s=args.reconnect_backoff_s,
             max_attempts=args.reconnect_max_attempts)
     finally:
         logger.close()
 
     if result:
-        checkpoint["complete"] = True
-        checkpoint["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        checkpoint["result_reason"] = result.reason
-        write_json_atomic(checkpoint_path, checkpoint)
         print(f"\nDone: {result.reason}")
-        print(f"Samples: {result.samples}  ->  {out}")
+        if args.save:
+            checkpoint["complete"] = True
+            checkpoint["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            checkpoint["result_reason"] = result.reason
+            write_json_atomic(checkpoint_path, checkpoint)
+            print(f"Samples: {result.samples}  ->  {out}")
+        else:
+            print(f"Samples: {result.samples} (not saved)")
         if result.capacity_ah is not None:
             print(f"Measured capacity (SOH): {result.capacity_ah:.3f} Ah "
                   f"({100*result.capacity_ah/cell.nominal_capacity_ah:.1f}% "

@@ -7,25 +7,21 @@ from launchTest import main
 
 # --------------------------- EDIT THESE SETTINGS ---------------------------
 # File name/stem from config/tests, or a full path to another test JSON.
-# Paper sequence, run one at a time instead of via runFolderVSCode.py:
-#   "paper/02c_cc_discharge_2C", "paper/02b_cc_discharge_1C",
-#   "paper/03a_pulse_train_precharge", "paper/03b_pulse_train"
-TEST = "cc_cv_charge"
+# Subfolders work too, e.g. "paper/02c_cc_discharge_2C".
+TEST = "connection_test"
 
 # Cell ID from config/cells. Set to None to use the cell written in the test.
 # Setting an ID here always overrides the value in the test JSON.
 CELL = "LP604765"
 
-# Real tester settings.
+# Serial port of the tester (Windows: "COM5"; Linux: "/dev/ttyUSB0").
 PORT = "COM5"
 
-# Keep True for an offline dry-run. Change to False only when the real tester
-# and the selected cell are connected; PORT is ignored in simulator mode.
-SIMULATOR = False
-TIME_ACCEL = 100.0
-SIMULATOR_INITIAL_SOC = 0.8
+# True: write CSV + metadata + checkpoint to results/<test name>/.
+# False: only print samples in the terminal (nothing saved, no resume).
+SAVE_DATA = True
 
-# Open a graph that updates during the test.
+# Open a graph that updates during the test (requires SAVE_DATA = True).
 LIVE_PLOT = False
 
 # Optional exact CSV path. Keep None for
@@ -63,14 +59,9 @@ def build_arguments() -> list[str]:
     args = ["--resume", resume_from] if resume_from else [TEST]
     if CELL and not resume_from:
         args += ["--cell", CELL]
-    if SIMULATOR:
-        args += [
-            "--sim",
-            "--time-accel", str(TIME_ACCEL),
-            "--sim-soc0", str(SIMULATOR_INITIAL_SOC),
-        ]
-    else:
-        args += ["--port", PORT]
+    args += ["--port", PORT]
+    if not SAVE_DATA:
+        args.append("--no-save")
     if LIVE_PLOT:
         args.append("--live-plot")
     if OUTPUT_CSV and not resume_from:

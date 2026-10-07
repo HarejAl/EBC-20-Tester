@@ -1,0 +1,12 @@
+{
+  "name": "discharge_to_3v0",
+  "type": "discharge",
+  "description": "Constant-current discharge to 3.00 V",
+  "sample_period_s": 1.0,
+  "current_unit": "C",
+  "current": 1.0,
+  "v_cutoff": 3.0,
+  "max_duration_s": 7200,
+  "voltage_cutoff_rest_s": 300,
+  "comment": "1C discharge until 3.00 V, then a 5 min zero-current rest is logged. Select the cell at launch."
+}

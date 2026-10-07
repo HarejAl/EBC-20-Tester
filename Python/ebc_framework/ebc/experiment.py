@@ -300,7 +300,7 @@ def capacity_test(dev: EBCA20, current_a: float, v_cutoff: float,
         # v_cutoff before we observe a sample at/below threshold -- so also
         # stop once the device has genuinely (not just momentarily) left
         # "discharge" mode after having genuinely been discharging, confirmed
-        # on the simulator 2026-07-01 (cellAlex at 1C stalled the full
+        # offline 2026-07-01 (cellAlex at 1C stalled the full
         # max_duration_s without this).
         if state["discharging"] and m.mode != "discharge":
             state["non_discharge_streak"] += 1

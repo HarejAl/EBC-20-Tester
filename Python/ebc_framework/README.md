@@ -1,191 +1,117 @@
-# EBC-A20 control & experiment framework
+# EBC-A20 framework: technical reference
 
-Drive a **ZKETECH EBC-A20** battery tester from a PC for **SOC/SOH algorithm
-validation** on real cells. Define tests and cells in JSON; one entry point
-(`launchTest.py`) runs DST profiles, HPPC pulse tests, charge, discharge
-(capacity/SOH), full cycles, or a composite multi-phase protocol — on the real
-device or a built-in simulator.
-
-## What "reverse engineered" means here
-
-ZKETECH never published the EBC-A20 serial protocol. The byte format was
-recovered by sniffing traffic between the official Windows app and the device
-and inferring each field's meaning. The frame format is solid, but field
-*scaling* is inferred and can vary by firmware revision — run
-`examples/verify_protocol.py` once against your physical unit (compare decoded
-V/I to the LCD) before trusting the numbers on a new setup.
-
-## Measurement sampling rate
-
-The device emits a status frame ~**once per second**; this cadence is set by
-the EBC firmware and **cannot** be increased from the PC. Polling faster just
-re-reads the same frame. `sample_period_s` in a test controls how often the
-control loop re-evaluates/re-commands, not the hardware measurement rate.
-
-## Getting started (new machine / new colleague)
-
-Not comfortable with a terminal? See **`HOW_TO_LAUNCH.md`** for an explicit,
-copy-paste walkthrough (opening PowerShell, finding the folder, exact
-commands) — including how to run the paper protocols in `config/tests/paper/`.
-
-1. Install Python 3.10+ and `pip install -r requirements.txt` from the
-   repository root (pyserial, numpy, matplotlib; scipy is optional).
-2. Run `python selftest.py` — it validates the protocol decoder, base-240
-   encoding, and runs every test type on the built-in simulator. Should print
-   `ALL CHECKS PASSED` / `CONFIG-DRIVEN CHECKS PASSED` with no hardware
-   attached.
-3. Connect the EBC-A20 over USB (CH340 chip → shows up as `/dev/ttyUSB0` on
-   Linux, `COMx` on Windows — check Device Manager if unsure which COM number).
-4. Run `python examples/verify_protocol.py COM5` (swap in your port) with a
-   cell/load connected, and compare the printed V/I against the EBC's own LCD.
-   If they don't match within a few percent, the decoder needs adjusting for
-   your firmware before trusting anything else here.
-5. Run the **connection test** (below) to confirm both discharge and charge
-   commands actually drive the cell, not just the read path.
-6. You're set — run any test in `config/tests/` against your own cell.
-
-## Connection test
-
-`config/tests/connection_test.json` is a 2-minute sanity check: 60 s discharge
-at 0.5 A, then 60 s charge at 0.5 A. Run it first on any new setup:
-
-```bash
-python launchTest.py config/tests/connection_test.json --port COM5
-```
-
-Watch the LCD: it should show `-PC-`, then an active discharge for 60 s, then
-an active charge for 60 s. 0.5 A is gentle enough to be safe on any cell in the
-library — just edit the `"cell"` field to match whichever cell you actually
-have connected.
+This is the reference for how the framework works and every JSON option. For
+installing, connecting the tester and running a first experiment, read the
+[repository README](../../README.md). For a copy-paste PowerShell
+walkthrough and the paper characterization sequence, read
+[`HOW_TO_LAUNCH.md`](HOW_TO_LAUNCH.md).
 
 ## Layout
 
 ```
 ebc/
-  protocol.py    frame build/parse, base-240 + decode_ranged (verified)
-  transport.py   SerialTransport (real) + SimulatorTransport (1-RC cell model)
+  protocol.py    frame build/parse, base-240 encoding, decode_ranged
+  transport.py   SerialTransport (9600 8O1) + FrameReassembler
   device.py      EBCA20 controller, SafetyLimits, generic run() loop
-  experiment.py  DataLogger, ProfileController, dst_profile, capacity_test
-  celllib.py     Cell + CellLibrary: load cell JSON, derive safety bounds
+  experiment.py  DataLogger, ProfileController, capacity_test
+  celllib.py     Cell + CellLibrary: load cell JSON, derive safety limits
   runner.py      TestDef + run_test: dispatch JSON tests (all types below)
 config/
-  cells/*.json   cell library (capacity, voltage window, current ratings, bounds)
-  tests/*.json   test definitions (dst / charge / discharge / hppc / cycle / protocol)
+  cells/*.json   cell library
+  tests/         test definitions; examples/ = templates, paper/ = sequence
 examples/
-  verify_protocol.py   one-time real-hardware decoder check (see above)
-  verify_stop.py       confirms STOP actually halts an active discharge
-  plot_log.py          plot a logged CSV, standalone or live (see below)
-ecm_characterization/  offline HPPC -> N-RC ECM fit, pseudo-OCV, validation
-                       (see its own README.md)
-launchTest.py    single CLI entry point -- run any JSON test, hardware or sim
-run*VSCode.py    edit-settings-and-click launchers (single test, whole folder,
-                 test + live BMS, ECM characterization, pseudo-OCV, validation)
-resampleResults.py  resample raw CSVs onto a uniform time grid
-results/<protocol>/  raw CSVs + metadata/checkpoints, grouped by protocol
-selftest.py      offline validation of the whole stack -- run this first
-selftest_*.py    focused offline regressions (link check, reconnect, recovery
-                 rest, capacity glitch, transport framing)
+  verify_protocol.py   one-time decoder check against the LCD
+  verify_stop.py       confirms STOP really halts an active discharge
+  plot_log.py          plot a logged CSV, once or live (--watch)
+tests/           offline regression tests on a fake tester (run_all.py)
+launchTest.py    command-line entry point
+runTestVSCode.py / runFolderVSCode.py   edit-and-click VS Code launchers
+results/<test>/  CSV + _meta.json + _checkpoint.json per run (git-ignored)
 ```
 
-## Running a test
+## What "reverse engineered" means here
 
-### From VS Code (no command to type)
+ZKETECH never published the EBC-A20 serial protocol. The byte format was
+recovered by sniffing traffic between the official Windows app and the device
+and inferring what each field means. The frame format is solid, but field
+*scaling* is inferred and can vary between firmware revisions. Run
+`examples/verify_protocol.py <port>` once on each unit and compare the
+decoded V/I with the LCD.
 
-Open `runTestVSCode.py` and edit the settings at the top: `TEST`, `CELL`,
-`PORT`, `SIMULATOR`, and `LIVE_PLOT`. Then click **Run Python File** in the
-top-right corner, or select **EBC-20: run configured test** in Run and Debug
-and press F5.
+- **Current scaling.** The current field decodes 10× too small with the
+  documented table, so `parse_status` multiplies it by 10. This was
+  confirmed on hardware only below 10 A.
+- **Ah counter.** The charge (Ah) field has not yet been compared with the
+  LCD.
 
-`TEST` may be just the file stem (for example `"discharge"` or `"paper/02a_cc_discharge_0p5C"`). `CELL`
-is an ID from `config/cells`; it overrides the cell in the test. Set `CELL =
-None` when you want to use the test JSON's own cell.
+## Measurement sampling rate
 
-### From a terminal
+The device sends a status frame about **once per second**. The firmware sets
+this rate and the PC cannot increase it. `sample_period_s` in a test controls
+how often a row is logged and the controller is re-evaluated, not how often
+the hardware measures. The link watchdog and the safety checks run at least
+once a second, whatever `sample_period_s` is.
 
-```bash
-# List the cell library:
+## Command line
+
+```
+python launchTest.py TEST --cell ID --port PORT [--no-save] [--live-plot]
+                          [--out CSV] [--no-auto-reconnect]
+                          [--reconnect-backoff-s S] [--reconnect-max-attempts N]
+python launchTest.py --resume RUN.csv|RUN_checkpoint.json --port PORT
 python launchTest.py --list-cells
-
-# Dry-run any test on the simulator (no hardware), accelerated:
-python launchTest.py config/tests/dst_validation.json --sim --time-accel 60
-
-# Run for real (Linux /dev/ttyUSB0, Windows COM3):
-python launchTest.py config/tests/dst_validation.json --port COM3
-
-# Select/override the cell at launch and show a live plot:
-python launchTest.py dst_validation --cell cellAlex --port COM3 --live-plot
 ```
 
-While running, `launchTest.py` prints one line per sample (`t=... V=... I=...
-Ah=... [mode]`) and writes to
-`results/<name>/<name>_<timestamp>.csv`. Sibling
-`<name>_<timestamp>_meta.json` is written **as soon as the run starts** (not
-after it finishes), so even an early-terminated or crashed run leaves you
-knowing exactly what test/cell config produced the partial CSV.
+`TEST` can be:
 
-Every test starts with a 10-second zero-current rest, which is included in the
-CSV. This applies automatically to all test types and existing test files. If
-needed for a special case, a test JSON can override the duration with
-`"initial_rest_s": 120` (or use `0` to disable it).
+- a path to a JSON file;
+- a file name inside `config/tests/`, with or without `.json`;
+- a subfolder path such as `examples/charge_to_3v8`.
 
-### Stop now and continue later
+`--no-save` prints the samples but writes no CSV, metadata or checkpoint. It
+can't be combined with `--resume`, `--out` or `--live-plot`. Automatic
+reconnect still works within the same process, using in-memory progress.
 
-Stop a running test with **Ctrl-C in VS Code's integrated terminal**. The
-device receives STOP and the run keeps a sibling `<name>_checkpoint.json`.
-Do not use VS Code's force-terminate/trash button for a normal pause, because
-it may kill Python before it can send STOP. To continue from
-VS Code, set `SELECT_RESUME_FILE = True` in `runTestVSCode.py`, run the file,
-and select either the interrupted CSV or its checkpoint. Alternatively, set
-`RESUME_FROM` directly to that path.
+### Output files
 
-From a terminal, the equivalent is:
+`<name>_<timestamp>.csv` has these columns:
 
-```bash
-python launchTest.py --resume results/<name>/<interrupted-run>.csv --port COM5
-```
+| Column | Meaning |
+| --- | --- |
+| `t_s` | Elapsed test time in s. It is continuous across resumes, so analysis should use this column. |
+| `wall_clock` | Local time of the sample. A jump here with no jump in `t_s` marks where a run was interrupted. |
+| `voltage_v` | Cell voltage in V. |
+| `current_a` | Magnitude of the current in A. |
+| `signed_current_a` | Current with sign: + charge, − discharge, 0 when idle. |
+| `charge_ah` | The device's Ah counter. It resets with every new command. |
+| `cumulative_ah` | Software running total of the charge (signed). Gaps longer than about 3 sample periods are not integrated. |
+| `mode` | `charge`, `discharge`, `idle` or `unknown`. |
 
-Continuation appends to the original CSV and restores the cycle/phase plus
-DST step, HPPC pulse/rest position, or cycle sub-phase. A fresh 10-second
-zero-current safety rest always occurs before current is reapplied. Time spent
-offline counts toward an interrupted rest period, but not toward an active
-charge/discharge duration. Completed runs cannot be resumed accidentally.
+`_meta.json` is written as soon as the run starts. Even a crashed run
+therefore records which test and cell produced the partial CSV.
 
-### Automatic reconnect after a dropped connection
+### Stop, resume, reconnect
 
-Real USB-serial connections occasionally drop mid-run (a CH340 driver hiccup,
-Windows suspending the port, a cable issue) -- long enough to matter on an
-unattended overnight test. On hardware runs, `launchTest.py` now catches
-this automatically: it waits (backing off from 5s up to 120s between
-attempts), reopens the port, and resumes from the same checkpoint `--resume`
-would use -- no manual restart needed. This is on by default; disable it
-with `--no-auto-reconnect`, or cap the attempts with
-`--reconnect-max-attempts N` (default: retry indefinitely). It never
-triggers on `--sim`. If a connection never comes back, it eventually gives
-up and leaves the checkpoint for a manual `--resume`, same as before this
-existed.
-
-If a test is *still* stopping every few hours even with this in place, that
-points at the port itself: in Device Manager, check Power Management on the
-USB-serial adapter and its parent USB hub(s) (uncheck "allow the computer to
-turn off this device to save power"), and disable system sleep for the
-duration of a run.
-
-### Watching a run live
-
-Plotting is a separate process from the one talking to the hardware, so it
-can't interfere with serial timing. Open a second terminal:
-
-```bash
-python examples/plot_log.py results/<name>/<name>_<timestamp>.csv --watch
-```
-
-refreshes every 2 s as the CSV grows. Drop `--watch` for a one-shot plot after
-a run finishes. Run `plot_log.py` with no arguments (or click Run in VS Code)
-to get a file-picker dialog defaulting to `results/` instead.
+- **Ctrl-C** sends STOP and keeps the checkpoint. Don't force-kill Python,
+  because STOP might not be sent.
+- **`--resume`** appends to the original CSV after a fresh 10-second
+  zero-current rest. It restores the protocol cycle and phase, the DST step,
+  the HPPC pulse/rest position, or the cycle sub-phase.
+  - Time spent offline counts toward an interrupted rest, but not toward an
+    active charge or discharge.
+  - Completed runs refuse to resume.
+- **Automatic reconnect.** If the USB-serial link drops, the script reopens
+  the port and resumes from the latest in-memory state.
+  - Back-off starts at 5 s and doubles up to 120 s. It resets after 3 healthy
+    minutes.
+  - A link that stays open but sends nothing for 15 s also counts as a drop.
+  - Disable it with `--no-auto-reconnect`, or cap it with
+    `--reconnect-max-attempts N` (consecutive failures).
+- **If runs still stop every few hours**, the cause is usually Windows power
+  management. In Device Manager, uncheck "allow the computer to turn off this
+  device" for the USB-serial adapter and its hubs, and disable sleep.
 
 ## Cells
-
-A cell JSON captures datasheet facts and emergency bounds:
 
 ```json
 {
@@ -201,131 +127,202 @@ A cell JSON captures datasheet facts and emergency bounds:
 }
 ```
 
-`max_v`/`min_v` are the normal operating defaults. Explicit test targets may
-go outside that nominal window, but are capped at `hard_max_v`/`hard_min_v`.
-Those hard limits are applied both to the tester-side cutoff command and the
-software emergency STOP. Add a file
-per cell to `config/cells/`. A test may reference a cell by its `id`, leave
-`"cell": ""`, or omit `cell` entirely. In the latter two cases, select it at
-launch with `--cell` or the VS Code launcher's `CELL` setting. A launch-time
-cell always overrides the test value. Any current a test requests is
-**silently clamped** (never raises) to the stricter of the
-cell's own `max_charge_a`/`max_discharge_a` and the EBC-A20's own absolute
-hardware ceiling (5 A charge / 20 A discharge) — check the logged current in
-the CSV, not just the test JSON, to see what was actually applied if you
-over-scale a profile.
+- **Default targets.** `max_v` and `min_v` are the default charge target and
+  discharge cutoff.
+- **Explicit targets.** A test may ask for a different voltage, such as
+  `v_max`, `v_min` or `v_cutoff`. The request is capped to
+  `hard_max_v` / `hard_min_v`, with a printed warning.
+- **Optional fields.** If `safety` is missing, the hard limits default to
+  `max_v + 0.05` and `min_v − 0.05`, and `charge_taper_a` defaults to 0.02C.
+- **Choosing the cell.** A test may name a cell with `"cell": "<id>"`, or
+  leave it empty and rely on `--cell`. `--cell` always takes priority.
 
-## Tests
+## Test types
 
-Test currents are **C-rate** (`"current_unit": "C"`) and scaled by the cell's
-nominal capacity, so the same test runs across cells. Set `"current_unit":
-"A"` for absolute amps. Types:
+Currents are C-rates (`"current_unit": "C"`, the default), scaled by
+`nominal_capacity_ah`. Use `"current_unit": "A"` for absolute amps. The sign
+is + charge and − discharge.
 
-- `dst`       — staircase `profile` of `{current, duration_s}` steps you define
-                yourself in the JSON (e.g. a published FUDS/DST table),
-                repeated `repeat` times.
-- `charge`    — CC charge to the cell's `max_v` (device handles CV taper).
-- `discharge` — CC discharge to `min_v` (or an optional `v_cutoff` override,
-                never lower than `hard_min_v`); reports usable Ah.
-- `hppc`      — discharge pulse (`pulse_current`, `pulse_s`) / rest (`rest_s`),
-                repeated until `v_min` -- resistance/relaxation characterization.
-- `rest`      — passive observation at zero applied current; logs the cell for
-                `max_duration_s` after explicitly stopping the tester.
-- `cycle`     — charge / rest / discharge / rest, `repeat` times; logs
-                per-cycle discharge capacity.
-- `protocol`  — composite test combining an optional discharge phase, rest,
-                optional CC-CV charge phase, and rest, repeated `repeat`
-                times. This is the most flexible type -- see below.
+Common fields:
 
-### `protocol` schema
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `name` | required | Name of the results folder and file prefix. |
+| `type` | required | One of the types below. |
+| `cell` | none | Cell ID. Can be supplied at launch with `--cell`. |
+| `sample_period_s` | 1.0 | Logging and control period. |
+| `max_duration_s` | none | Safety time limit for the test. In `protocol` tests it applies to each phase. |
+| `initial_rest_s` | 10 | Zero-current rest and link checks at the start. `0` skips both. |
+| `voltage_cutoff_rest_s` | 600 | Recovery rest logged after a low-voltage cutoff. |
+
+### `charge`
+
+A CC-CV charge.
+
+```json
+"charge": { "protocol": "cc_cv", "c_rate": 0.5, "v_max": 3.8,
+            "cutoff_c": 0.05, "rest_after_s": 600, "max_duration_s": 10800 }
+```
+
+- **How it ends.** The tester applies constant current until it reaches
+  `v_max`, then holds `v_max` until the current falls below `cutoff_c`, and
+  then stops on its own. The run ends when the tester reports end of charge
+  or goes idle.
+- **Defaults.** `v_max` defaults to the cell's `max_v`, and `cutoff_c`
+  defaults to the cell's `charge_taper_a`.
+- **Older syntax.** A top-level `"current": <C-rate>` (with no `charge`
+  block) also works. It charges to `max_v` with the default taper.
+
+### `discharge`
+
+A constant-current discharge to `v_cutoff` (default `min_v`). It reports the
+measured capacity.
+
+```json
+"current": 1.0, "v_cutoff": 3.0
+```
+
+- **End condition.** The discharge ends at `v_cutoff`, or when the device
+  has really left discharge mode for 3 consecutive samples. A single garbled
+  frame is ignored.
+- **Default time limit.** The default `max_duration_s` is 6 h.
+
+### `dst`
+
+Plays a list of current steps.
+
+```json
+"repeat": 3,
+"profile": [ { "current": -1.0, "duration_s": 30 },
+             { "current":  0.0, "duration_s": 60 } ]
+```
+
+- **End condition.** The test ends after `repeat` passes, at `max_duration_s`,
+  or at a safety limit.
+- **Shape-only profiles.** Add `"profile_peak_c_rate": 2.0` to treat
+  `current` as a shape: the profile is scaled so its largest step equals 2C.
+
+### `hppc`
+
+```json
+"pulse_current": 1.0, "pulse_s": 60, "rest_s": 600, "v_min": 2.75
+```
+
+Discharge pulse, then rest, repeated until the voltage reaches `v_min`
+during a pulse. During a rest, STOP is re-sent while any current is still
+measured.
+
+### `rest`
+
+Zero current for `max_duration_s` (required). The tester is stopped
+explicitly first.
+
+### `cycle`
+
+```json
+"charge_current": 1.0, "discharge_current": 1.0, "repeat": 5,
+"rest_after_charge_s": 300, "rest_after_discharge_s": 300
+```
+
+Charge to `max_v`, rest, discharge to `min_v`, rest, repeated. The
+discharge capacity of each cycle is printed at the end.
+
+### `protocol`
+
+A combination of an optional discharge phase and an optional CC-CV charge
+phase, each followed by a rest, repeated `repeat` times.
 
 ```json
 {
-  "type": "protocol", "cell": "cellAlex", "repeat": 3,
+  "type": "protocol", "repeat": 3,
+  "order": ["discharge", "charge"],
   "discharge": {
-    "protocol": "dst",       // "dst" | "hppc" | "crate" | null (skip discharge)
-    "c_rate": 2.0,           // scales the built-in DST staircase, or the
-                             // pulse/constant current for hppc/crate
-    "v_min": 3.0,            // stop once voltage drops to/below this
-    "rest_after_s": 300,     // rest after the discharge phase ends
+    "protocol": "crate",     // "crate" | "hppc" | "dst"; null skips the phase
+    "c_rate": 1.0,           // constant current, pulse current, or DST peak
+    "v_min": 3.0,            // end of the discharge phase
+    "rest_after_s": 300,
     "pulse_s": 60,           // hppc only
-    "pulse_rest_s": 120      // hppc only (rest *between* pulses)
+    "pulse_rest_s": 120,     // hppc only
+    "profile": [ ... ],      // dst only, optional; largest step -> c_rate
+    "max_duration_s": 3600   // optional per-phase time limit
   },
   "charge": {
-    "protocol": "cc_cv",     // only supported value, or null (skip charge)
-    "c_rate": 1.0,
-    "v_max": 4.2,            // default max_v; explicit values cap at hard_max_v
-    "cutoff_c": 0.02,        // taper/termination current as a C-rate
-    "rest_after_s": 300
+    "protocol": "cc_cv",     // null skips the phase
+    "c_rate": 0.5, "v_max": 4.2, "cutoff_c": 0.02,
+    "rest_after_s": 300, "max_duration_s": 14400
   }
 }
 ```
 
-Either `"discharge"` or `"charge"` can be `null`/omitted for a charge-only or
-discharge-only repeated protocol. Note: `protocol`'s `"dst"` discharge mode
-plays the fixed built-in staircase shape (`ebc/experiment.py:dst_profile`)
-scaled by a single C-rate number -- it can't reproduce an arbitrary custom
-profile. If you need a specific published DST/FUDS table, use the standalone
-`"dst"` test type instead, which reads whatever `profile` array you put in
-the JSON directly.
+- **Order.** `"order": ["charge", "discharge"]` charges first.
+- **`dst` discharge phase.** It loops its staircase until `v_min`. Give it
+  a `"profile"` to use your own shape, scaled so the largest step equals
+  `c_rate`. Without one, it uses the illustrative staircase built into
+  `ebc/experiment.py:dst_profile`.
 
-## Safety
+## Safety model
 
-Three layers, all derived from the cell file:
-1. **Device-side cutoffs** embedded in each command frame (low-V for
-   discharge, CV + taper for charge) — protect the cell even if the PC/loop
-   stalls.
-2. **Software `SafetyLimits`** checked every loop; issues STOP on violation.
-3. **Current clamping** on every `set_charge`/`set_discharge` call — caps to
-   the stricter of the cell's rating and the EBC's own hardware ceiling,
-   without ever raising an error (see Cells, above).
+All limits come from the cell file.
 
-Set conservative bounds for your chemistry. Never leave a charging cell
-unattended.
+1. **Tester-side cutoffs.** Every start command carries the cutoff voltage
+   for discharge, or the CV target and taper current for charge. These
+   protect the cell even if the PC stalls.
+2. **Software checks.** Each received frame is checked against `hard_max_v`,
+   against `hard_min_v` (while discharging), and against the current limit
+   for the active direction. Any violation sends STOP and aborts the test.
+3. **Current capping.** Every request is capped to the stricter of the
+   cell's rating and the EBC's own limit (5 A charge, 20 A discharge). The cap
+   is rounded down to the device's 10 mA steps, so it can never round above
+   the cell's limit.
+4. **Command confirmation.** If 3 consecutive frames contradict the
+   requested state, the command is re-sent. After 3 failed retries the test
+   stops with `command confirmation failed`.
+5. **Startup link check.** A test first checks that a plausible voltage is
+   being read. Then, during the initial rest, it checks that a C/10 pulse
+   really draws current. If either fails, the test stops before the real
+   experiment begins.
 
-### Voltage-cutoff recovery rest
+### Low-voltage cutoff
 
-Reaching the low-voltage boundary during discharge is treated as a normal,
-recoverable end-of-discharge condition rather than a completed useful pulse.
-The runner immediately sends STOP, repeatedly confirms zero measured current,
-and continues logging a 600-second zero-current recovery rest before ending
-the test. Set `"voltage_cutoff_rest_s"` in a test JSON to override the default.
+Reaching the low-voltage limit while discharging (`discharge`, `hppc`, a
+`dst` that ends at its limit, or a software `v_min` stop) is treated as a
+normal end of discharge:
 
-If execution is interrupted during this recovery, resume continues only its
-remaining duration; it does not restart the discharge or HPPC pulse. The
-checkpoint records `voltage cutoff reached`, allowing ECM characterization to
-reject the final interrupted HPPC pulse automatically.
+- STOP is sent at once.
+- Zero current is confirmed.
+- A recovery rest of `voltage_cutoff_rest_s` (600 s by default) is logged.
+- If the run is interrupted during the recovery rest, a resume finishes only
+  the remaining rest.
 
-This does not weaken genuine fault handling. Measured overcurrent, hard
-overvoltage, and repeated command-state confirmation failure still STOP and
-abort immediately instead of continuing into an automatic rest.
+Over-current, hard over-voltage and command-confirmation failure still abort
+immediately.
 
-## A real-hardware quirk worth knowing
+## Hardware quirk: STOP before every setpoint change
 
-Confirmed on real hardware: **the EBC only accepts a new start-charge/
-start-discharge command when it's currently idle** — a command sent while
-already actively driving current is silently ignored. `EBCA20.set_current()`
-already handles this for you (it forces an explicit STOP with a brief settle
-delay before every setpoint change), so you don't need to think about it when
-writing a test — but if you're calling `set_charge`/`set_discharge` directly
-in your own script rather than through `set_current()`/the test runner,
-remember to stop first.
+The EBC accepts a new start-charge or start-discharge command only when it is
+idle. A command sent while it is already driving current is silently ignored
+(confirmed on hardware). `EBCA20.set_current()` therefore sends STOP and
+waits 0.3 s before every change. If your own scripts call `set_charge` /
+`set_discharge` directly, stop first.
 
-## Simulator
+## Offline tests
 
-`--sim` swaps in a 1-RC Thevenin cell (OCV-SOC curve, coulomb integration) so
-you can develop and validate control/estimation logic with no hardware.
-`--time-accel N` compresses both the cell physics and profile-step durations
-by N for fast dry runs. The real backend ignores acceleration. Always dry-run
-a new test on the simulator before running it for real.
+`python tests/run_all.py` runs every regression test against
+`tests/fake_tester.py`. This is a cell and tester emulator used only by the
+tests; experiments always use the real device. The tests cover:
+
+- frame decoding;
+- every test type and every example protocol;
+- the link checks;
+- reconnect and resume;
+- the low-voltage recovery rest;
+- `--no-save`.
 
 ## Protocol provenance
 
-Frame format, 9600 **8O1** serial, base-240 encoding and `decode_ranged` from
-the documented reverse-engineering by Maciej Grela / enkiusz
-(`pop.fsck.pl/hardware/zketech-ebc-a20.html`), cross-checked with
-`Kazhuu/ebc-battery-tester` (FRAMES.md) and `dev-strom/esp-ebc-mqtt`. The
-self-test confirms the decoder reproduces the documented frame CRC. Field
-scaling for the *current* channel was found to differ from the documented
-value on our unit (confirmed against the LCD) and is corrected in
-`ebc/protocol.py` -- re-verify on any new firmware revision.
+The frame format, 9600 baud **8O1** serial settings, base-240 encoding and
+`decode_ranged` come from the documented reverse-engineering by Maciej Grela
+/ enkiusz (`pop.fsck.pl/hardware/zketech-ebc-a20.html`). They were
+cross-checked with `Kazhuu/ebc-battery-tester` (FRAMES.md) and
+`dev-strom/esp-ebc-mqtt`. `tests/selftest.py` confirms that the decoder
+reproduces the documented frame CRC.
